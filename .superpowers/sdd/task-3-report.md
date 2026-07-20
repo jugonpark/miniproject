@@ -27,3 +27,14 @@ Implemented bounded Last.fm, MusicBrainz, and Cover Art Archive providers plus c
 - GREEN targeted: `python -m pytest tests/test_providers.py -q` reported `14 passed in 0.29s`.
 - GREEN full: `python -m pytest -q -p no:cacheprovider` reported `29 passed in 0.47s` outside the sandbox for pytest temporary-directory access.
 - Commit: `73e077d fix: align verified track provider contract`.
+
+## Provider review rejection follow-up
+
+- RED: `python -m pytest tests/test_providers.py -q` reported `8 failed, 15 passed` for retry-attempt spacing/backoff, `Retry-After`, failed-task eviction, cross-loop task reuse, and malformed Last.fm nesting.
+- Cancellation RED: `python -m pytest tests/test_providers.py::test_discovery_cache_recovers_after_cancelled_task -q` reported `1 failed`; the cancelled task remained cached.
+- MusicBrainz now applies its injected limiter before every HTTP attempt, including retries, while the shared requester uses nonzero exponential backoff or numeric `Retry-After`.
+- Async cache calls still coalesce same-loop in-flight work, evict failed/cancelled tasks by identity, and replace tasks created on another event loop.
+- Last.fm nested containers and lists are type-checked and malformed structures normalize to empty results/tags.
+- GREEN targeted: `python -m pytest tests/test_providers.py -q` reported `24 passed in 0.21s`.
+- GREEN full: `python -m pytest -q -p no:cacheprovider` reported `39 passed in 0.43s` outside the sandbox for pytest temporary-directory access.
+- Commit: `54d8a98 fix: harden provider retries and async caches`.
