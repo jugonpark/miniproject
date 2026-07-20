@@ -23,6 +23,7 @@ export const recommendedTrackSchema = z.object({
   recommendation_reason: z.string().optional(),
   youtube_music_url: httpUrlSchema,
   familiar: z.boolean(),
+  role: z.enum(["EMPATHY", "GROUNDING", "TRANSITION", "TARGET", "CLOSURE"]).nullable().optional(),
 });
 
 export const playlistDraftSchema = z.object({
@@ -30,6 +31,7 @@ export const playlistDraftSchema = z.object({
   description: z.string().default(""),
   request: musicRequestSchema,
   tracks: z.array(recommendedTrackSchema).min(1),
+  recommendation_status: z.enum(["SUCCESS", "PARTIAL", "INSUFFICIENT_MATCHING_TRACKS"]).optional(),
 });
 
 export const savedPlaylistSchema = playlistDraftSchema.extend({

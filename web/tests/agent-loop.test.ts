@@ -63,7 +63,7 @@ describe("runAgent", () => {
     process.env.NVIDIA_API_KEY = "test-key";
     const replies = [
       { content: null, tool_calls: [{ id: "call_discover", type: "function", function: { name: "discover_music_candidates", arguments: "{\"moods\":[\"calm\"],\"activities\":[\"study\"],\"region\":\"mixed\"}" } }] },
-      { content: null, tool_calls: [{ id: "call_compose", type: "function", function: { name: "compose_playlist", arguments: "{\"conditions\":[\"study\"],\"region\":\"mixed\",\"track_count\":5}" } }] },
+      { content: null, tool_calls: [{ id: "call_compose", type: "function", function: { name: "compose_playlist", arguments: "{\"conditions\":[\"study\"],\"region\":\"mixed\",\"track_count\":5,\"selected_candidates\":[{\"candidateId\":\"recording-1\",\"role\":\"TARGET\",\"reason\":\"study evidence\"}]}" } }] },
       { content: "추천이 완료되었습니다." },
     ];
     const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: replies.shift() }] }), { status: 200 }));
@@ -84,13 +84,14 @@ describe("runAgent", () => {
     expect(requests.map((request) => (request.tools??[]).map((tool: {function:{name:string}}) => tool.function.name))).toEqual([
       ["discover_music_candidates"], ["compose_playlist"], [],
     ]);
-    expect(requests[1].messages.slice(-2)).toMatchObject([
+    expect(requests[1].messages.slice(-3)).toMatchObject([
       { role:"assistant", content:"", tool_calls:[{id:"call_discover"}] },
       { role:"tool", tool_call_id:"call_discover" },
+      { role:"user", content: expect.stringContaining("VERIFIED_CANDIDATES_JSON") },
     ]);
     expect(typeof requests[1].messages.at(-1).content).toBe("string");
     expect(mocks.callTool.mock.calls[2][1].verified_tracks).toEqual(verified);
-    expect(mocks.callTool.mock.calls[1][1].artist_candidates).toEqual(["Artist"]);
+    expect(mocks.callTool.mock.calls[1][1].artist_candidates).toEqual([{ artist_name: "Artist" }]);
     expect(events.some((event) => event.type === "playlist")).toBe(true);
     expect(events.some((event) => event.type === "insight" && event.stage === "AI 검색 조건")).toBe(true);
     expect(events.some((event) => event.type === "insight" && event.stage === "검증된 곡")).toBe(true);

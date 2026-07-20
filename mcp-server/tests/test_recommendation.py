@@ -121,7 +121,7 @@ def test_compose_playlist_honors_limits_ratio_unique_recordings_and_artist_cap()
 
     assert len(draft.tracks) == 7
     assert [item.recording_id for item in draft.tracks] == [
-        "f1", "f2", "f4", "d1", "d2", "d3", "d4",
+        "f1", "f4", "d1", "d3", "f2", "d2", "d4",
     ]
     assert [item.position for item in draft.tracks] == list(range(1, len(draft.tracks) + 1))
     assert sum(item.familiar for item in draft.tracks) == 3
@@ -160,4 +160,74 @@ def test_compose_playlist_returns_honest_short_result_without_fabrication():
 
     draft = compose_playlist(candidates, MusicRequest(conditions=["calm"], count=5))
 
-    assert [item.recording_id for item in draft.tracks] == ["only-1", "only-2"]
+    assert [item.recording_id for item in draft.tracks] == ["only-1"]
+
+
+def test_intent_composition_keeps_candidate_ids_roles_and_partial_status():
+    intent = {
+        "rawRequest": "공부용 숨은 곡",
+        "hardConstraints": {"requiredScenes": []},
+        "preferences": {"activities": ["STUDY"], "popularity": "hidden_gems"},
+        "emotionalArc": {"start": "답답함", "middle": "grounding", "end": "focus"},
+    }
+    candidates = [
+        track("one", "Artist 1", tags=["focus", "ambient"], popularity=10).model_copy(update={"candidate_id": "candidate:one"}),
+        track("two", "Artist 2", tags=["calm"], popularity=20).model_copy(update={"candidate_id": "candidate:two"}),
+    ]
+    request = MusicRequest(conditions=["공부"], count=5, recommendation_intent=intent)
+    draft = compose_playlist(candidates, request)
+    assert draft.recommendation_status == "PARTIAL"
+    assert [item.candidate_id for item in draft.tracks] == ["candidate:one", "candidate:two"]
+    assert [item.role for item in draft.tracks] == ["EMPATHY", "CLOSURE"]
+    assert all(item.recommendation_reason for item in draft.tracks)
+
+
+def test_nvidia_candidate_order_is_not_reordered_by_familiarity_ratio():
+    candidates = [
+        track("familiar", "Known", tags=["focus"]).model_copy(update={"candidate_id": "candidate:familiar"}),
+        track("discovery", "New", tags=["focus"]).model_copy(update={"candidate_id": "candidate:discovery"}),
+    ]
+    request = MusicRequest(
+        conditions=["focus"],
+        familiar_artists=["Known"],
+        count=5,
+        recommendation_intent={"preferences": {"activities": ["STUDY"]}},
+    )
+    selections = [
+        {"candidateId": "candidate:discovery", "role": "EMPATHY", "reason": "first"},
+        {"candidateId": "candidate:familiar", "role": "TARGET", "reason": "second"},
+    ]
+
+    draft = compose_playlist(candidates, request, selected_candidates=selections)
+
+    assert [item.candidate_id for item in draft.tracks] == ["candidate:discovery", "candidate:familiar"]
+
+
+def test_nvidia_selection_cannot_restore_unknown_origin_under_strict_kr_intent():
+    unknown = track("unknown", "Unknown", tags=["focus"]).model_copy(update={"candidate_id": "candidate:unknown", "origin_status": "UNKNOWN"})
+    korean = track("kr", "Korean", tags=["focus"]).model_copy(update={"candidate_id": "candidate:kr", "origin_status": "VERIFIED_KR", "artist_country": "KR"})
+    intent = {"hardConstraints": {"allowedCountries": ["KR"]}, "preferences": {"activities": ["STUDY"]}}
+    request = MusicRequest(conditions=["focus"], region="domestic", count=5, recommendation_intent=intent)
+    selections = [
+        {"candidateId": "candidate:unknown", "role": "EMPATHY", "reason": "must be removed"},
+        {"candidateId": "candidate:kr", "role": "TARGET", "reason": "allowed"},
+    ]
+
+    draft = compose_playlist([unknown, korean], request, selected_candidates=selections)
+
+    assert [item.candidate_id for item in draft.tracks] == ["candidate:kr"]
+
+
+def test_compose_prefers_one_track_per_artist_when_other_artists_are_available():
+    candidates = [
+        track("a1", "A", popularity=10),
+        track("a2", "A", popularity=9),
+        track("b1", "B", popularity=8),
+        track("c1", "C", popularity=7),
+        track("d1", "D", popularity=6),
+        track("e1", "E", popularity=5),
+    ]
+    draft = compose_playlist(candidates, MusicRequest(conditions=["energetic"], count=5))
+    assert len({item.artist for item in draft.tracks}) == 5
+    assert sum(item.artist == "A" for item in draft.tracks) == 1
+    assert all(left.artist != right.artist for left, right in zip(draft.tracks, draft.tracks[1:]))

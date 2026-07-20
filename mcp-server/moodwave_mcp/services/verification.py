@@ -9,7 +9,7 @@ from moodwave_mcp.models import CandidateArtist, VerifiedTrack
 
 from .cache import TTLCache, get_or_create_async
 from .normalization import normalize_music_name
-from .constraints import candidate_id, curated_origin
+from .constraints import KOREAN_INDIE_TAGS, candidate_id, curated_origin
 
 logger = logging.getLogger("moodwave.verification")
 if not logger.handlers:
@@ -42,16 +42,27 @@ class VerificationService:
         tracks_per_artist: int = 5,
         strict_country_filter: bool = False,
         korean_indie: bool = False,
+        target_count: int | None = None,
     ) -> list[VerifiedTrack]:
         bounded_per_artist = min(2, max(0, tracks_per_artist))
-        artist_list = list(artists)[:8]
+        artist_list = list(artists)[:20 if strict_country_filter else 8]
         verified: list[VerifiedTrack] = []
+        # Stop once there is enough usable diversity for the requested size. The
+        # composer still prefers 7 artists for 10 tracks when they are available,
+        # but verification must not keep making slow network calls merely to hit
+        # that soft preference.
+        target_artists = 4 if (target_count or 50) <= 5 else 5 if (target_count or 50) <= 10 else 7
         seen: set[str] = set()
         seen_names: set[tuple[str, str]] = set()
         stats = {"similarArtists": sum(artist.source == "lastfm:similar" for artist in artist_list), "topTracks": 0, "rawCandidates": 0, "deduplicatedCandidates": 0, "verifiedKoreanArtists": 0, "foreignArtists": 0, "unknownOriginArtists": 0, "iTunesStrongMatches": 0, "iTunesWeakMatches": 0, "iTunesNotFound": 0, "musicBrainzMatches": 0, "musicBrainzNotFound": 0, "finalVerifiedCandidates": 0}
         rejections: list[dict[str, str]] = []
         for artist in artist_list:
             origin_status, artist_country = "UNKNOWN", None
+            normalized_artist_tags = {normalize_music_name(tag) for tag in artist.tags}
+            scene_evidence = "scene" in artist.matched_categories or bool(
+                normalized_artist_tags
+                & {normalize_music_name(tag) for tag in KOREAN_INDIE_TAGS}
+            )
             if strict_country_filter:
                 origin_status = curated_origin(artist.name)
                 artist_country = "KR" if origin_status == "VERIFIED_KR" else None
@@ -68,9 +79,11 @@ class VerificationService:
                     continue
                 if origin_status != "VERIFIED_KR":
                     stats["unknownOriginArtists"] += 1
-                    rejections.append({"artist": artist.name, "reason": "UNKNOWN_ARTIST_ORIGIN"})
-                    continue
-                stats["verifiedKoreanArtists"] += 1
+                else:
+                    stats["verifiedKoreanArtists"] += 1
+            if korean_indie and not scene_evidence:
+                rejections.append({"artist": artist.name, "reason": "SCENE_EVIDENCE_MISSING"})
+                continue
             try:
                 if self.track_provider is None:
                     tracks = await get_or_create_async(self.cache, ("verify", artist.name.strip().casefold(), bounded_per_artist), lambda artist=artist: self.musicbrainz.verify_artist_tracks(artist.name, bounded_per_artist))
@@ -150,11 +163,14 @@ class VerificationService:
                             "popularity_score": artist.popularity,
                             "artist_country": artist_country,
                             "origin_status": origin_status,
-                            "scene_match": "KOREAN_INDIE" if korean_indie else None,
+                            "scene_match": "KOREAN_INDIE" if korean_indie and scene_evidence else None,
                         }
                     )
                 verified.append(enriched.model_copy(update={"candidate_id": candidate_id(enriched)}))
                 stats["finalVerifiedCandidates"] = len(verified)
+                if target_count and len(verified) >= target_count and len({item.artist_name.casefold() for item in verified}) >= target_artists:
+                    logger.info("verification_summary=%s rejection_reasons=%s", json.dumps(stats, ensure_ascii=False), json.dumps(rejections[:50], ensure_ascii=False))
+                    return verified
                 if len(verified) >= self.max_results:
                     logger.info("verification_summary=%s rejection_reasons=%s", json.dumps(stats, ensure_ascii=False), json.dumps(rejections[:50], ensure_ascii=False))
                     return verified

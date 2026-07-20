@@ -16,6 +16,7 @@ class MusicRequest(BaseModel):
     scene: Literal["KOREAN_INDIE"] | None = None
     strict_country_filter: bool = False
     allow_foreign_artists: bool = True
+    recommendation_intent: dict | None = None
 
     @model_validator(mode="after")
     def require_condition_or_free_text(self) -> "MusicRequest":
@@ -35,6 +36,9 @@ class CandidateArtist(BaseModel):
     origin_status: Literal["VERIFIED_KR", "VERIFIED_FOREIGN", "UNKNOWN"] = "UNKNOWN"
     artist_country: str | None = None
     scene_match: Literal["KOREAN_INDIE"] | None = None
+    matched_tags: list[str] = Field(default_factory=list)
+    matched_categories: list[str] = Field(default_factory=list)
+    appearance_count: int = Field(default=1, ge=1)
 
 
 class TrackCandidate(BaseModel):
@@ -124,6 +128,7 @@ class RecommendedTrack(BaseModel):
     recommendation_reason: str = ""
     youtube_music_url: HttpUrl
     familiar: bool
+    role: Literal["EMPATHY", "GROUNDING", "TRANSITION", "TARGET", "CLOSURE"] | None = None
 
 
 class PlaylistDraft(BaseModel):
@@ -131,6 +136,7 @@ class PlaylistDraft(BaseModel):
     description: str = ""
     request: MusicRequest
     tracks: list[RecommendedTrack] = Field(min_length=1)
+    recommendation_status: Literal["SUCCESS", "PARTIAL", "INSUFFICIENT_MATCHING_TRACKS"] = "SUCCESS"
 
 
 class SavedPlaylist(PlaylistDraft):

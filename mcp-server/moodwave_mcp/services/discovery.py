@@ -24,6 +24,17 @@ class DiscoveryService:
         )
         return list(result)[:bounded]
 
+    async def discover_grouped(self, groups: dict[str, list[str]], quotas: dict[str, int], limit: int = 25) -> list[CandidateArtist]:
+        bounded = min(self.max_results, max(0, limit))
+        normalized = {category: normalize_tags(tags) for category, tags in groups.items() if tags}
+        result = await get_or_create_async(self.cache, ("discover_grouped", tuple((key, tuple(value)) for key, value in normalized.items()), tuple(sorted(quotas.items())), bounded), lambda: self.provider.discover_grouped(normalized, quotas, bounded))
+        return list(result)[:bounded]
+
+    async def discover_country(self, country: str, limit: int = 25) -> list[CandidateArtist]:
+        bounded = min(self.max_results, max(0, limit))
+        result = await get_or_create_async(self.cache, ("discover_country", country, bounded), lambda: self.provider.discover_country(country, bounded))
+        return list(result)[:bounded]
+
     async def expand(self, artists: Iterable[str], limit: int = 25) -> list[CandidateArtist]:
         normalized = normalize_tags(artists)
         bounded = min(self.max_results, max(0, limit))
