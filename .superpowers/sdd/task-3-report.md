@@ -38,3 +38,13 @@ Implemented bounded Last.fm, MusicBrainz, and Cover Art Archive providers plus c
 - GREEN targeted: `python -m pytest tests/test_providers.py -q` reported `24 passed in 0.21s`.
 - GREEN full: `python -m pytest -q -p no:cacheprovider` reported `39 passed in 0.43s` outside the sandbox for pytest temporary-directory access.
 - Commit: `54d8a98 fix: harden provider retries and async caches`.
+
+## Provider v2 review follow-up
+
+- RED: `python -m pytest tests/test_providers.py -q` reported `4 failed, 25 passed`; huge, infinite, and NaN `Retry-After` values were unsafe, and cancelling one cache waiter cancelled the shared task.
+- Retry delays now reject non-finite/non-positive values, fall back to normal exponential backoff, and cap valid external delays at exactly 5 seconds.
+- Cache waiters now use `asyncio.shield`; caller cancellation leaves shared work cached for surviving waiters, while underlying cancellation/failure still evicts by task identity.
+- GREEN targeted: `python -m pytest tests/test_providers.py -q` reported `29 passed in 0.44s`.
+- GREEN Task 1-3 regression: `python -m pytest tests/test_database.py tests/test_recommendation.py tests/test_providers.py -q -p no:cacheprovider` reported `44 passed in 0.67s`.
+- GREEN full: `python -m pytest -q -p no:cacheprovider` reported `48 passed in 0.41s` after the concurrent `MusicRequest` contract change settled.
+- Commit: `8507692 fix: bound retries and shield shared cache work`.
