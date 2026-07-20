@@ -12,6 +12,10 @@ class MusicRequest(BaseModel):
     free_text: str | None = None
     familiar_artists: list[str] = Field(default_factory=list)
     count: Literal[5, 10, 15] = 10
+    artist_origin_country: Literal["KR"] | None = None
+    scene: Literal["KOREAN_INDIE"] | None = None
+    strict_country_filter: bool = False
+    allow_foreign_artists: bool = True
 
     @model_validator(mode="after")
     def require_condition_or_free_text(self) -> "MusicRequest":
@@ -28,6 +32,15 @@ class CandidateArtist(BaseModel):
     tags: list[str] = Field(default_factory=list)
     popularity: int = Field(default=0, ge=0)
     region: str | None = None
+    origin_status: Literal["VERIFIED_KR", "VERIFIED_FOREIGN", "UNKNOWN"] = "UNKNOWN"
+    artist_country: str | None = None
+    scene_match: Literal["KOREAN_INDIE"] | None = None
+
+
+class TrackCandidate(BaseModel):
+    artist: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    source: str = Field(min_length=1)
 
 
 class VerifiedTrack(BaseModel):
@@ -64,6 +77,10 @@ class VerifiedTrack(BaseModel):
         validation_alias=AliasChoices("popularity_score", "popularity"),
     )
     source: str = Field(default="musicbrainz", min_length=1)
+    candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    artist_country: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    origin_status: Literal["VERIFIED_KR", "VERIFIED_FOREIGN", "UNKNOWN"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    scene_match: Literal["KOREAN_INDIE"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     # Compatibility properties keep Task 2 callers working while serialized data uses the approved contract.
     @property
@@ -94,6 +111,7 @@ class VerifiedTrack(BaseModel):
 class RecommendedTrack(BaseModel):
     position: int = Field(ge=1)
     recording_id: str = Field(min_length=1)
+    candidate_id: str | None = None
     title: str = Field(min_length=1)
     artist: str = Field(min_length=1)
     artist_id: str | None = None

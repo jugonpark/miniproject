@@ -10,6 +10,7 @@ const httpUrlSchema = z.url().refine((value) => {
 export const recommendedTrackSchema = z.object({
   position: z.number().int().min(1),
   recording_id: z.string().min(1),
+  candidate_id: z.string().nullable().optional(),
   title: z.string().min(1),
   artist: z.string().min(1),
   artist_id: z.string().nullable().default(null),

@@ -6,7 +6,10 @@ from time import monotonic
 
 import httpx
 
-from moodwave_mcp.models import VerifiedTrack
+from difflib import SequenceMatcher
+
+from moodwave_mcp.models import TrackCandidate, VerifiedTrack
+from moodwave_mcp.services.normalization import music_version, normalize_music_name
 
 from .base import JsonRequester
 
@@ -100,6 +103,56 @@ class MusicBrainzProvider:
             if len(tracks) >= bounded:
                 break
         return tracks
+
+    async def verify_track(self, candidate: TrackCandidate) -> VerifiedTrack | None:
+        payload = await self._get("/recording", params={"query": f'recording:"{candidate.title}" AND artist:"{candidate.artist}"', "fmt": "json", "inc": "releases+release-groups+artist-credits", "limit": 10})
+        best: tuple[float, dict, dict] | None = None
+        for item in payload.get("recordings", []) if isinstance(payload.get("recordings"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            credit = next((entry.get("artist") for entry in item.get("artist-credit", []) if isinstance(entry, dict) and isinstance(entry.get("artist"), dict)), {})
+            title_score = SequenceMatcher(None, normalize_music_name(candidate.title), normalize_music_name(str(item.get("title") or ""))).ratio()
+            artist_score = SequenceMatcher(None, normalize_music_name(candidate.artist), normalize_music_name(str(credit.get("name") or ""))).ratio()
+            if music_version(candidate.title) != music_version(str(item.get("title") or "")):
+                continue
+            total = title_score * .55 + artist_score * .40 + .05
+            if title_score >= .80 and artist_score >= .75 and total >= .82 and (best is None or total > best[0]):
+                best = (total, item, credit)
+        if best is None:
+            return None
+        _, item, credit = best
+        release = _best_release(item.get("releases"))
+        group = release.get("release-group", {}) if release else {}
+        return VerifiedTrack(recording_id=str(item["id"]), track_title=str(item["title"]), artist_name=str(credit.get("name") or candidate.artist), artist_mbid=str(credit.get("id")) if credit.get("id") else None, album_title=str(release.get("title")) if release.get("title") else None, release_year=_release_year(release), release_id=str(release.get("id")) if release.get("id") else None, release_group_id=str(group.get("id")) if isinstance(group, dict) and group.get("id") else None)
+
+    async def artist_aliases(self, artist: str) -> list[str]:
+        payload = await self._get("/artist", params={"query": f'artist:"{artist}"', "fmt": "json", "limit": 1})
+        items = payload.get("artists")
+        if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+            return []
+        item = items[0]
+        aliases = [str(alias.get("name")) for alias in item.get("aliases", []) if isinstance(alias, dict) and alias.get("name")]
+        return [str(item.get("name")), *aliases] if item.get("name") else aliases
+
+    async def artist_origin(self, artist: str) -> tuple[str, str | None]:
+        """Return origin from the Artist entity only; release countries never count."""
+        payload = await self._get("/artist", params={"query": f'artist:"{artist}"', "fmt": "json", "limit": 3})
+        items = payload.get("artists")
+        if not isinstance(items, list):
+            return "UNKNOWN", None
+        expected = normalize_music_name(artist)
+        for item in items:
+            if not isinstance(item, dict) or SequenceMatcher(None, expected, normalize_music_name(str(item.get("name") or ""))).ratio() < .75:
+                continue
+            country = str(item.get("country") or "").upper()
+            area = item.get("area") if isinstance(item.get("area"), dict) else {}
+            begin_area = item.get("begin-area") if isinstance(item.get("begin-area"), dict) else {}
+            codes = {country, *[str(code).upper() for code in area.get("iso-3166-1-codes", [])], *[str(code).upper() for code in begin_area.get("iso-3166-1-codes", [])]}
+            if "KR" in codes:
+                return "VERIFIED_KR", "KR"
+            if any(code for code in codes if len(code) == 2):
+                return "VERIFIED_FOREIGN", next(code for code in codes if len(code) == 2)
+        return "UNKNOWN", None
 
     async def _get(self, path: str, *, params: dict[str, object]) -> dict:
         payload = await self.requester.get(

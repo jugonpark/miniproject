@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from moodwave_mcp.models import MusicRequest, PlaylistDraft, RecommendedTrack, VerifiedTrack
 
 from .normalization import normalize_tags
+from .constraints import enforce_track_constraints
 from .youtube_link import create_youtube_music_url
 
 
@@ -18,7 +19,7 @@ def compose_playlist(
     familiar_artists = set(normalize_tags(request.familiar_artists))
     unique_tracks: list[VerifiedTrack] = []
     seen_recordings: set[str] = set()
-    for track in tracks:
+    for track in enforce_track_constraints(list(tracks), request):
         if track.recording_id not in seen_recordings:
             seen_recordings.add(track.recording_id)
             unique_tracks.append(track)
@@ -53,6 +54,7 @@ def compose_playlist(
         RecommendedTrack(
             position=position,
             recording_id=track.recording_id,
+            candidate_id=track.candidate_id,
             title=track.title,
             artist=track.artist,
             artist_id=track.artist_id,

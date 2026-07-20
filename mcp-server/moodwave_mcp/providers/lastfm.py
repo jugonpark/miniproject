@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from collections.abc import Iterable
 
 import httpx
 
-from moodwave_mcp.models import CandidateArtist
+from moodwave_mcp.models import CandidateArtist, TrackCandidate
 from moodwave_mcp.services.normalization import normalize_tags
 
 from .base import JsonRequester, ProviderError
@@ -29,11 +32,18 @@ class LastFmProvider:
         bounded = min(50, max(0, limit))
         if not bounded:
             return []
+        requested_tags = normalize_tags(tags)
+        per_tag = min(10, max(3, (bounded + max(1, len(requested_tags)) - 1) // max(1, len(requested_tags))))
+        payloads = await asyncio.gather(
+            *(self._call("tag.gettopartists", tag=tag, limit=per_tag) for tag in requested_tags),
+            return_exceptions=True,
+        )
         results: list[CandidateArtist] = []
         seen: set[str] = set()
-        for tag in normalize_tags(tags):
-            payload = await self._call("tag.gettopartists", tag=tag, limit=bounded)
-            artists = _nested_list(payload, "topartists", "artist")
+        counts: dict[str, int] = {}
+        for tag, payload in zip(requested_tags, payloads):
+            artists = [] if isinstance(payload, BaseException) else _nested_list(payload, "topartists", "artist")
+            counts[tag] = len(artists)
             for item in artists:
                 if not isinstance(item, dict):
                     continue
@@ -50,9 +60,11 @@ class LastFmProvider:
                         popularity=_integer(item.get("listeners") or item.get("playcount")),
                     )
                 )
-                if len(results) >= bounded:
-                    return results
-        return results
+        logging.getLogger("moodwave").warning(
+            "lastfm_discovery=%s",
+            json.dumps({"lastFmMethod": "tag.getTopArtists", "lastFmRequestedTags": requested_tags, "resultCountByTag": counts}, ensure_ascii=False),
+        )
+        return results[:bounded]
 
     async def similar(self, artists: Iterable[str], limit: int = 25) -> list[CandidateArtist]:
         bounded = min(50, max(0, limit))
@@ -81,6 +93,22 @@ class LastFmProvider:
                 )
                 if len(results) >= bounded:
                     return results
+        return results
+
+    async def top_tracks(self, artist: str, limit: int = 5) -> list[TrackCandidate]:
+        bounded = min(10, max(0, limit))
+        if not artist.strip() or not bounded:
+            return []
+        payload = await self._call("artist.gettoptracks", artist=artist.strip(), limit=bounded)
+        results = []
+        for item in _nested_list(payload, "toptracks", "track"):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("name") or "").strip()
+            credited = item.get("artist")
+            name = str(credited.get("name") if isinstance(credited, dict) else artist).strip()
+            if title and name:
+                results.append(TrackCandidate(artist=name, title=title, source="lastfm:toptracks"))
         return results
 
     async def _top_tags(self, artist: str) -> list[str]:

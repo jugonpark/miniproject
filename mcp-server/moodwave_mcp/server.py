@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+
 from fastmcp import FastMCP
 
 from .config import Settings
@@ -7,13 +10,16 @@ from .database import Database
 from .models import CandidateArtist, MusicRequest, PlaylistDraft, VerifiedTrack
 from .providers.cover_art import CoverArtProvider
 from .providers.lastfm import LastFmProvider
+from .providers.itunes import ITunesProvider
 from .providers.musicbrainz import MusicBrainzProvider
 from .postgres_database import PostgresDatabase
 from .services.discovery import DiscoveryService
 from .services.recommendation import compose_playlist as compose
 from .services.verification import VerificationService
+from .services.constraints import discovery_tags, is_domestic_request, is_korean_indie_request
 
 settings = Settings.from_env()
+logging.getLogger("moodwave").setLevel(logging.INFO)
 database = PostgresDatabase(settings.database_path) if settings.database_path.startswith(("postgres://", "postgresql://")) else Database(settings.database_path)
 database.initialize()
 mcp = FastMCP("MOODWAVE")
@@ -26,7 +32,9 @@ def _discovery() -> DiscoveryService | None:
 def _verification() -> VerificationService | None:
     if not settings.musicbrainz_user_agent:
         return None
-    return VerificationService(MusicBrainzProvider(settings.musicbrainz_user_agent), CoverArtProvider())
+    itunes = ITunesProvider(base_url=settings.itunes_search_base_url, country=settings.itunes_search_country, timeout=settings.itunes_search_timeout) if settings.itunes_search_enabled else None
+    track_provider = LastFmProvider(settings.lastfm_api_key) if settings.lastfm_api_key else None
+    return VerificationService(MusicBrainzProvider(settings.musicbrainz_user_agent), CoverArtProvider(), itunes=itunes, track_provider=track_provider)
 
 
 @mcp.tool
@@ -38,7 +46,14 @@ async def discover_music_candidates(
     service = _discovery()
     if service is None:
         raise RuntimeError("LASTFM_API_KEY is required")
-    return await service.discover([*moods, *activities, *([vocal_preference] if vocal_preference else [])], limit)
+    values = [*moods, *activities, *([vocal_preference] if vocal_preference else [])]
+    tags = discovery_tags(region, values)
+    candidates = await service.discover(tags, limit)
+    logging.getLogger("moodwave").warning(
+        "discovery_summary=%s",
+        json.dumps({"generatedMusicTags": tags, "rawCandidates": len(candidates), "deduplicatedCandidates": len(candidates), "candidatesBeforeDomesticFilter": len(candidates), "candidatesAfterDomesticFilter": len(candidates)}, ensure_ascii=False),
+    )
+    return candidates
 
 
 @mcp.tool
@@ -55,26 +70,41 @@ async def expand_similar_artists(
 @mcp.tool
 async def verify_music_tracks(
     artist_candidates: list[str], region: str = "mixed", limit_per_artist: int = 5,
+    conditions: list[str] | None = None, original_request: str = "",
 ) -> list[VerifiedTrack]:
     """Verify real recordings with MusicBrainz and attach cover art when available."""
     service = _verification()
     if service is None:
         raise RuntimeError("MUSICBRAINZ_USER_AGENT is required")
     candidates = [CandidateArtist(name=name, source="agent") for name in artist_candidates]
-    return await service.verify(candidates, limit_per_artist)
+    values = [*(conditions or []), original_request]
+    strict = is_domestic_request(region, values)
+    return await service.verify(candidates, limit_per_artist, strict_country_filter=strict, korean_indie=is_korean_indie_request(values))
 
 
 @mcp.tool
 def compose_playlist(
     verified_tracks: list[VerifiedTrack], conditions: list[str], region: str = "mixed",
     track_count: int = 10, original_request: str = "", familiar_artists: list[str] | None = None,
-) -> PlaylistDraft:
+) -> PlaylistDraft | dict:
     """Compose the final playlist exclusively from verified track input."""
+    if not verified_tracks:
+        return {"success": False, "code": "EMPTY_TRACK_LIST", "message": "플레이리스트를 구성할 검증된 곡이 없습니다.", "retryable": False}
+    values = [*conditions, original_request]
+    domestic = is_domestic_request(region, values)
+    korean_indie = is_korean_indie_request(values)
     request = MusicRequest(
         conditions=conditions, region=region, free_text=original_request or None,
         familiar_artists=familiar_artists or [], count=track_count,
+        artist_origin_country="KR" if domestic else None,
+        scene="KOREAN_INDIE" if korean_indie else None,
+        strict_country_filter=domestic,
+        allow_foreign_artists=not domestic,
     )
-    return compose(verified_tracks, request)
+    draft = compose(verified_tracks, request)
+    if not draft.tracks:
+        return {"success": False, "code": "INSUFFICIENT_VERIFIED_CANDIDATES", "message": "조건에 맞는 국내 인디 음악을 충분히 확인하지 못했어요. 확인된 곡만 만나보거나 검색 범위를 조금 넓힐 수 있어요.", "choices": ["확인된 국내 인디 곡만 보기", "다른 국내 장르까지 넓히기", "선택 수정하기"]}
+    return draft
 
 
 @mcp.tool
