@@ -97,15 +97,21 @@ class LastFmProvider:
         logging.getLogger("moodwave").warning("lastfm_grouped_discovery=%s", json.dumps({"requestedTagsByCategory": groups, "quotas": quotas, "resultCountByTag": counts, "discoveredArtists": [artist.name for artist in ranked[:bounded]], "artistEvidence": [artist.model_dump(include={"name", "matched_tags", "matched_categories", "appearance_count"}) for artist in ranked[:bounded]]}, ensure_ascii=False))
         return ranked[:bounded]
 
-    async def discover_country(self, country: str, limit: int = 25) -> list[CandidateArtist]:
+    async def discover_country(self, country: str, limit: int = 25, required_tags: Iterable[str] = ()) -> list[CandidateArtist]:
         bounded = min(50, max(0, limit))
-        payload = await self._call("geo.gettopartists", country=country, limit=bounded)
+        requested = set(normalize_tags(required_tags))
+        payload = await self._call("geo.gettopartists", country=country, limit=min(50, max(bounded * 2, 20)))
         artists = _nested_list(payload, "topartists", "artist")
-        return [
-            CandidateArtist(name=str(item["name"]).strip(), source="lastfm:geo", popularity=_integer(item.get("listeners")), matched_categories=["country_seed"])
-            for item in artists
-            if isinstance(item, dict) and str(item.get("name") or "").strip()
-        ][:bounded]
+        named = [(str(item["name"]).strip(), item) for item in artists if isinstance(item, dict) and str(item.get("name") or "").strip()]
+        tag_results = await asyncio.gather(*(self._top_tags(name) for name, _ in named), return_exceptions=True)
+        results = []
+        for (name, item), tags in zip(named, tag_results):
+            normalized = [] if isinstance(tags, BaseException) else tags
+            matched = sorted(requested & set(normalized))
+            if requested and not matched:
+                continue
+            results.append(CandidateArtist(name=name, source="lastfm:geo", tags=normalized, popularity=_integer(item.get("listeners")), matched_tags=matched, matched_categories=["country_seed"], appearance_count=max(1, len(matched))))
+        return sorted(results, key=lambda artist: (-artist.appearance_count, -artist.popularity))[:bounded]
 
     async def similar(self, artists: Iterable[str], limit: int = 25) -> list[CandidateArtist]:
         bounded = min(50, max(0, limit))

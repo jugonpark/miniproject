@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EmotionInterview } from "@/components/EmotionInterview";
 import { activityEntry, type ActivityEntry } from "@/lib/agent/activity-log";
 import type { MusicRequest } from "@/lib/schemas/music";
@@ -17,21 +17,34 @@ export default function Home() {
   const [activityLogs, setActivityLogs] = useState<ActivityEntry[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [session, setSession] = useState<RecommendationSession | null>(null); const [chat, setChat] = useState("");
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const requestGenerationRef = useRef(0);
   useEffect(() => { try { const saved = sessionStorage.getItem("moodwave-recommendation-session"); if (saved) setSession(JSON.parse(saved)); } catch {} }, []);
   useEffect(() => { if (session) sessionStorage.setItem("moodwave-recommendation-session", JSON.stringify(session)); }, [session]);
 
+  function resetRecommendationFlow() {
+    requestGenerationRef.current += 1;
+    abortControllerRef.current?.abort(); abortControllerRef.current = null;
+    setStatus(""); setSummary(""); setPlaylist(null); setError(""); setLoading(false); setSaved(false); setProgress(0);
+    setActivityLogs([]); setInsights([]); setSession(null); setChat("");
+    sessionStorage.removeItem("moodwave-recommendation-session");
+  }
+
   async function recommend(request: MusicRequest) {
-    if (loading) return;
+    const generation = ++requestGenerationRef.current;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController(); abortControllerRef.current = controller;
     setLoading(true); setProgress(0); setError(""); setSummary(""); setPlaylist(null); setSaved(false); setActivityLogs([]); setInsights([]);
     try {
-      const response = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...request, recommendation_session: request.recommendation_session ?? session ?? undefined }) });
+      const response = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ ...request, recommendation_session: request.recommendation_session ?? session ?? undefined }) });
+      if (generation !== requestGenerationRef.current) return;
       if (!response.ok || !response.body) throw new Error("RECOMMENDATION_CONNECTION_FAILED");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let completionStatus: "SUCCESS" | "PARTIAL" = "SUCCESS";
       while (true) {
-        const { done, value } = await reader.read(); if (done) break;
+        const { done, value } = await reader.read(); if (generation !== requestGenerationRef.current) { await reader.cancel(); return; } if (done) break;
         buffer += decoder.decode(value, { stream: true }); const rows = buffer.split("\n"); buffer = rows.pop() ?? "";
         for (const row of rows) {
-          if (!row) continue; const event = JSON.parse(row); const entry = activityEntry(event);
+          if (!row || generation !== requestGenerationRef.current) continue; const event = JSON.parse(row); const entry = activityEntry(event);
           if (entry) setActivityLogs((old) => [...old, entry].slice(-10));
           if (typeof event.progress === "number") setProgress(event.progress);
           if (event.type === "status") setStatus(event.message);
@@ -44,8 +57,8 @@ export default function Home() {
           if (event.type === "done") setStatus(event.ok === false ? "추천을 완료하지 못했어요." : completionStatus === "PARTIAL" ? "조건에 맞는 확인된 곡만 담았어요." : "추천이 완성됐어요.");
         }
       }
-    } catch { setError("추천 서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."); setActivityLogs((old) => [...old, { state: "failed", message: "음악 추천 연결에 실패했어요." }]); }
-    finally { setLoading(false); }
+    } catch (caught) { if (controller.signal.aborted || generation !== requestGenerationRef.current || (caught instanceof DOMException && caught.name === "AbortError")) return; setError("추천 서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."); setActivityLogs((old) => [...old, { state: "failed", message: "음악 추천 연결에 실패했어요." }]); }
+    finally { if (generation === requestGenerationRef.current) { setLoading(false); abortControllerRef.current = null; } }
   }
 
   async function revise() { const message = chat.trim(); if (!message || !playlist) return; setChat(""); await recommend({ ...playlist.request, free_text: message, recommendation_session: session ?? undefined }); }
@@ -58,7 +71,7 @@ export default function Home() {
 
   return <main className="shell">
     <header className="header"><div><div className="logo">MOODWAVE</div><div className="muted">마음의 흐름을 듣는 AI 음악 큐레이터</div></div><Link className="secondary" href="/library">보관함</Link></header>
-    <EmotionInterview loading={loading} onSubmit={(request) => { setSession(null); sessionStorage.removeItem("moodwave-recommendation-session"); void recommend(request); }} />
+    <EmotionInterview loading={loading} onReset={resetRecommendationFlow} onSubmit={(request) => { setSession(null); sessionStorage.removeItem("moodwave-recommendation-session"); void recommend(request); }} />
     {(loading || status) && <div className="status" aria-live="polite"><div>{loading && "◌ "}{status} <strong>{progress}%</strong></div><div className="progress"><span style={{ width: `${progress}%` }} /></div></div>}
     {activityLogs.length > 0 && <section className="activity-panel" aria-live="polite"><strong>음악을 찾는 과정</strong><ol>{activityLogs.map((entry, index) => <li data-state={entry.state} key={`${index}-${entry.message}`}><span aria-hidden="true" />{entry.message}</li>)}</ol></section>}
     {insights.length > 0 && <section className="activity-panel insight-panel"><strong>추천 데이터 확인</strong><ol>{insights.map((item, index) => <li data-state="completed" key={`${item.stage}-${index}`}><span aria-hidden="true" /><b>{item.stage}</b> {item.message}</li>)}</ol></section>}

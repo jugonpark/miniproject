@@ -81,12 +81,21 @@ export function mergeIntent(ai: RecommendationIntent, fallback: RecommendationIn
   return recommendationIntentSchema.parse({
     ...ai,
     rawRequest: fallback.rawRequest,
+    currentState: fallback.currentState,
+    targetState: fallback.targetState,
+    activity: fallback.activity,
     hardConstraints: { ...ai.hardConstraints, region: explicit.region, allowedCountries: explicit.allowedCountries.length ? explicit.allowedCountries : ai.hardConstraints.allowedCountries, excludedCountries: explicit.excludedCountries.length ? explicit.excludedCountries : ai.hardConstraints.excludedCountries, requiredScenes: explicit.requiredScenes },
     preferences: { ...ai.preferences, moods: [...new Set([...fallback.preferences.moods, ...ai.preferences.moods])], activities: fallback.preferences.activities.length ? fallback.preferences.activities : ai.preferences.activities, genres: fallback.preferences.genres, ...(fallback.preferences.energy !== undefined ? { energy: fallback.preferences.energy } : {}), ...(fallback.preferences.vocalAmount ? { vocalAmount: fallback.preferences.vocalAmount } : {}), ...(fallback.preferences.popularity === "hidden_gems" ? { popularity: "hidden_gems", familiarity: "discovery" } : {}) },
   });
 }
 
 export function fallbackIntent(request: MusicRequest): RecommendationIntent {
+  const ui = request.ui_selections ?? {};
+  const broadState = typeof ui.broadState === "string" ? ui.broadState : undefined;
+  const emotionDetail = typeof ui.emotionDetail === "string" ? ui.emotionDetail : undefined;
+  const regulationGoal = typeof ui.regulationGoal === "string" ? ui.regulationGoal : undefined;
+  const uiActivity = typeof ui.activity === "string" ? ui.activity : undefined;
+  const uiIntensity = typeof ui.intensity === "number" ? ui.intensity : undefined;
   const text = `${request.conditions.join(" ")} ${request.free_text ?? ""}`.toLowerCase();
   const allowJapan = /일본.{0,8}(괜찮|포함|좋아)|japan.{0,8}(ok|include)/i.test(text);
   const domestic = !allowJapan && (request.region === "domestic" || /국내|한국|korean|k-indie/.test(text));
@@ -102,9 +111,9 @@ export function fallbackIntent(request: MusicRequest): RecommendationIntent {
   return recommendationIntentSchema.parse({
     rawRequest: request.free_text ?? "",
     rawRequests: request.free_text ? [request.free_text] : [],
-    currentState: { broadState: request.conditions[0], emotionDetail: request.conditions[1], energy: highEnergy ? "high" : "unknown" },
-    targetState: { goal: revival ? "REVIVAL" : study ? "FOCUS" : undefined, energy: highEnergy ? "high" : "unknown", changeIntensity: Number(request.conditions.join(" ").match(/감정 강도 ([1-5])/)?.[1]) || undefined },
-    activity: explicitWorkout ? "WORKOUT" : study ? "STUDY" : undefined,
+    currentState: { broadState, emotionDetail, energy: highEnergy ? "high" : "unknown" },
+    targetState: { goal: regulationGoal ?? (revival ? "REVIVAL" : study ? "FOCUS" : undefined), energy: highEnergy ? "high" : "unknown", changeIntensity: uiIntensity },
+    activity: uiActivity ?? (explicitWorkout ? "WORKOUT" : study ? "STUDY" : undefined),
     hardConstraints: {
       region: allowJapan ? "mixed" : request.region,
       allowedCountries: domestic ? ["KR"] : [],

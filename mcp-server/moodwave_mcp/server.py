@@ -51,17 +51,24 @@ async def discover_music_candidates(
     groups = discovery_tags_by_category(region, values, recommendation_intent)
     quotas = {"current_state": 6, "target_state": 10, "transition": 4, "activity": 6, "scene": 8, "genre": 6, "vocal": 4}
     candidates = await service.discover_grouped(groups, quotas, limit)
+    before_domestic_filter = len(candidates)
     if region == "domestic" and not groups.get("scene") and not groups.get("genre"):
-        country_candidates = await service.discover_country("Korea, Republic of", limit)
+        requested_tags = [tag for tags in groups.values() for tag in tags]
+        country_candidates = await service.discover_country("Korea, Republic of", limit, requested_tags)
         merged = {candidate.name.casefold(): candidate for candidate in candidates}
         for candidate in country_candidates:
             key = candidate.name.casefold()
             current = merged.get(key)
             merged[key] = candidate if current is None else current.model_copy(update={"matched_categories": list(dict.fromkeys([*current.matched_categories, "country_seed"])), "appearance_count": current.appearance_count + 1, "popularity": max(current.popularity, candidate.popularity)})
-        candidates = sorted(merged.values(), key=lambda candidate: (-(curated_origin(candidate.name) == "VERIFIED_KR"), -("country_seed" in candidate.matched_categories), -candidate.appearance_count, -candidate.popularity))[:limit]
+        candidates = list(merged.values())
+    if region == "domestic":
+        # geo/tag discovery never proves origin. At this boundary only identities
+        # backed by the local KR identity evidence may be shown or verified.
+        candidates = [candidate for candidate in candidates if curated_origin(candidate.name) == "VERIFIED_KR"]
+    candidates = sorted(candidates, key=lambda candidate: (-len(candidate.matched_tags), -candidate.appearance_count, -candidate.popularity))[:limit]
     logging.getLogger("moodwave").warning(
         "discovery_summary=%s",
-        json.dumps({"requestId": request_id, "requestedTagsByCategory": groups, "lastFmTagPlan": (recommendation_intent or {}).get("lastFmTagPlan", {}), "rawRequest": (recommendation_intent or {}).get("rawRequest", ""), "hardConstraints": (recommendation_intent or {}).get("hardConstraints", {}), "preferences": (recommendation_intent or {}).get("preferences", {}), "emotionalArc": (recommendation_intent or {}).get("emotionalArc", {}), "priorityOrder": (recommendation_intent or {}).get("priorityOrder", []), "rawCandidates": len(candidates), "deduplicatedCandidates": len(candidates), "candidatesBeforeDomesticFilter": len(candidates), "candidatesAfterDomesticFilter": len(candidates)}, ensure_ascii=False),
+        json.dumps({"requestId": request_id, "requestedTagsByCategory": groups, "lastFmTagPlan": (recommendation_intent or {}).get("lastFmTagPlan", {}), "rawRequest": (recommendation_intent or {}).get("rawRequest", ""), "hardConstraints": (recommendation_intent or {}).get("hardConstraints", {}), "preferences": (recommendation_intent or {}).get("preferences", {}), "emotionalArc": (recommendation_intent or {}).get("emotionalArc", {}), "priorityOrder": (recommendation_intent or {}).get("priorityOrder", []), "rawCandidates": before_domestic_filter, "deduplicatedCandidates": before_domestic_filter, "candidatesBeforeDomesticFilter": before_domestic_filter, "candidatesAfterDomesticFilter": len(candidates)}, ensure_ascii=False),
     )
     return candidates
 

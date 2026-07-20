@@ -75,7 +75,7 @@ export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>
     yield {type:"activity",service:"nvidia",state:"completed",message:"NVIDIA AI 응답 완료"};
     if(!answer.tool_calls?.length){
       if(tools.length)throw new Error("NVIDIA_TOOL_CALL_MISSING");
-      const content=playlist?safeFinalNarrative(answer.content,playlist,Array.isArray(verifiedTracks)?verifiedTracks as Array<{artist_name?:unknown;track_title?:unknown}>:[]):answer.content?.trim()||"검증된 곡을 찾았습니다.";
+      const content=playlist?safeFinalNarrative(answer.content,playlist,Array.isArray(verifiedTracks)?verifiedTracks as Array<{artist_name?:unknown;track_title?:unknown;artist_country?:unknown;origin_status?:unknown;tags?:unknown}>:[]):answer.content?.trim()||"검증된 곡을 찾았습니다.";
       for(const delta of content.match(/.{1,16}/gs)??[]) yield {type:"text_delta",delta,progress:95};
       if(playlist) {session.currentIntent=intent;session.currentPlaylistCandidateIds=playlist.tracks.map((track)=>track.candidate_id).filter((value):value is string=>Boolean(value));const assistantMessage={id:crypto.randomUUID(),role:"assistant" as const,content:intentPatch?.userMeaningSummary??"선택한 마음과 요청을 추천에 반영했어요.",createdAt:new Date().toISOString()};session.messages.push(assistantMessage);yield {type:"session",data:session};yield {type:"playlist",data:playlist};}
       return;

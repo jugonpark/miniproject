@@ -128,6 +128,13 @@ def score_track(track: VerifiedTrack, intent: dict) -> TrackRecommendationFeatur
     arc_targets = {"focus", "study", "ambient", "calm"} if "focus" in str(arc.get("end", "")).casefold() else mood_targets
     emotional_arc_score = (20.0 if tags & arc_targets else 0.0) if arc_targets and tags else None
 
+    # Popularity cannot become the primary fallback when no musical evidence
+    # supports the requested state, goal, activity, or scene.
+    has_music_evidence = bool(positive_matches) or any(value is not None for value in (energy_score, mood_score, activity_score, scene_score, vocal_score))
+    if not has_music_evidence:
+        popularity_score = None
+        novelty_score = None
+
     chat_breakdown = {
         "scene_genre": 6.0 if scene_score and scene_score > 0 else 0.0,
         "activity": 4.0 if activity_score and activity_score > 0 else 0.0,
@@ -147,4 +154,13 @@ def score_track(track: VerifiedTrack, intent: dict) -> TrackRecommendationFeatur
 
 def evaluate_tracks(tracks: list[VerifiedTrack], intent: dict) -> list[ScoredTrack]:
     scored = [ScoredTrack(track, score_track(track, intent)) for track in tracks]
-    return sorted((item for item in scored if item.features.hard_constraint_result.passed), key=lambda item: (-item.features.total_score, item.track.recording_id))
+    return sorted(
+        (item for item in scored if item.features.hard_constraint_result.passed),
+        key=lambda item: (
+            len(item.features.negative_tag_matches),
+            -len(item.features.positive_tag_matches),
+            -sum(item.features.cluster_scores.values()),
+            -item.features.total_score,
+            item.track.recording_id,
+        ),
+    )

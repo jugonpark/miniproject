@@ -6,7 +6,7 @@ import { broadOptions, clearDependentAnswers, conditionalOptions, detailByBroad,
 
 const initial: EmotionFlowState = { currentStep: "INTRO" };
 
-export function EmotionInterview({ loading, onSubmit }: { loading: boolean; onSubmit: (request: MusicRequest) => void }) {
+export function EmotionInterview({ loading, onSubmit, onReset }: { loading: boolean; onSubmit: (request: MusicRequest) => void; onReset?: () => void }) {
   const [state, setState] = useState<EmotionFlowState>(initial);
   const [history, setHistory] = useState<EmotionFlowState[]>([]);
   const [locked, setLocked] = useState(false);
@@ -30,7 +30,7 @@ export function EmotionInterview({ loading, onSubmit }: { loading: boolean; onSu
     const previous = history.at(-1);
     if (previous) { setHistory((old) => old.slice(0, -1)); setState(previous); }
   };
-  const reset = () => { if (loading) return; setState(initial); setHistory([]); setLocked(false); localStorage.removeItem("moodwave-emotion-flow"); };
+  const reset = () => { setState(initial); setHistory([]); setLocked(false); localStorage.removeItem("moodwave-emotion-flow"); onReset?.(); };
   const nextAfter = (updated: EmotionFlowState, step: EmotionFlowStep) => {
     const path = pathFor(updated); return { ...updated, currentStep: path[path.indexOf(step) + 1] ?? "FLOW_PREVIEW" };
   };
@@ -63,7 +63,7 @@ export function EmotionInterview({ loading, onSubmit }: { loading: boolean; onSu
       <p className="eyebrow">지금의 마음을 천천히 들여다봐요</p><h1 id="emotion-question" ref={heading} tabIndex={-1}>{question}</h1>
       <div className={`interview-options ${state.currentStep === "INTENSITY" ? "intensity-options" : ""}`}>{choices.map((option) => <button key={option.value} className="emotion-option" disabled={locked} aria-pressed={selected(state, option.value)} onClick={() => select(option)}>{state.currentStep === "INTENSITY" && <i style={{ "--size": `${18 + Number(option.value) * 5}px` } as CSSProperties} />}<span>{option.label}</span></button>)}</div>
     </div>}
-    {state.currentStep !== "INTRO" && <div className="interview-nav"><button className="back-button" disabled={loading || locked || history.length === 0} onClick={back}>← 이전으로</button><button className="reset-button" disabled={loading} onClick={reset}>처음부터</button></div>}
+    {state.currentStep !== "INTRO" && <div className="interview-nav"><button className="back-button" disabled={loading || locked || history.length === 0} onClick={back}>← 이전으로</button><button className="reset-button" onClick={reset}>처음부터</button></div>}
   </section>;
 }
 
