@@ -16,8 +16,10 @@ export async function POST(raw: Request) {
         for await (const event of runAgent(request)) send(event);
         send({ type:"done" });
       } catch (error) {
+        console.error("agent request failed", error instanceof Error ? error.message : "UNKNOWN");
         const missing=error instanceof Error&&error.message==="NVIDIA_API_KEY_MISSING";
-        send({ type:"error", code:missing?"NVIDIA_API_KEY_MISSING":"AGENT_FAILED", message:missing?"NVIDIA API 키가 설정되지 않았습니다.":"추천을 만드는 중 문제가 발생했습니다. NVIDIA와 MCP 설정을 확인해 주세요." });
+        const timeout=error instanceof Error&&(error.message==="MCP_TOOL_TIMEOUT"||error.name==="TimeoutError");
+        send({ type:"error", code:missing?"NVIDIA_API_KEY_MISSING":timeout?"UPSTREAM_TIMEOUT":"AGENT_FAILED", message:missing?"NVIDIA API 키가 설정되지 않았습니다.":timeout?"음악 서비스 응답이 늦어 요청을 종료했습니다. 잠시 후 다시 시도해 주세요.":"추천 생성에 실패했습니다. 서버 로그의 오류 코드를 확인해 주세요." });
         send({ type:"done" });
       } finally { controller.close(); }
     },

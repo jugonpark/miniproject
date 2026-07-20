@@ -61,6 +61,8 @@ button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .actions { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
 .status, .summary { margin-top: 18px; }
 .status { color: #1ed760; }
+.progress { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: #333; }
+.progress span { display: block; height: 100%; border-radius: inherit; background: #1ed760; transition: width .25s ease; }
 .error { color: #f3727f; box-shadow: #f3727f 0 0 0 1px inset; }
 .summary strong { display: block; margin-bottom: 8px; font-size: 1.1rem; }
 .summary p { margin: 0; color: #cbcbcb; line-height: 1.55; }

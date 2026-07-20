@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 
 from moodwave_mcp.models import CandidateArtist, VerifiedTrack
@@ -26,10 +27,10 @@ class VerificationService:
         artists: Iterable[CandidateArtist],
         tracks_per_artist: int = 5,
     ) -> list[VerifiedTrack]:
-        bounded_per_artist = min(25, max(0, tracks_per_artist))
+        bounded_per_artist = min(3, max(0, tracks_per_artist))
         verified: list[VerifiedTrack] = []
         seen: set[str] = set()
-        for artist in list(artists)[: self.max_results]:
+        for artist in list(artists)[:8]:
             try:
                 tracks = await get_or_create_async(
                     self.cache,
@@ -41,17 +42,15 @@ class VerificationService:
                 )
             except Exception:
                 continue
-            for track in tracks:
+            covers = await asyncio.gather(
+                *(self.cover_art.find_cover(track.release_id, track.release_group_id) for track in tracks),
+                return_exceptions=True,
+            )
+            for track, cover in zip(tracks, covers, strict=True):
                 if track.recording_id in seen:
                     continue
                 seen.add(track.recording_id)
-                try:
-                    cover_url = await self.cover_art.find_cover(
-                        track.release_id,
-                        track.release_group_id,
-                    )
-                except Exception:
-                    cover_url = None
+                cover_url = None if isinstance(cover, Exception) else cover
                 verified.append(
                     VerifiedTrack.model_validate(
                         {

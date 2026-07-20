@@ -651,3 +651,24 @@ def test_verification_cache_evicts_failed_artist_tasks_for_recovery():
     assert calls == 2
     assert first == []
     assert [track.recording_id for track in second] == ["ok-1"]
+
+
+def test_verification_limits_external_artist_calls():
+    class StubMusicBrainz:
+        def __init__(self):
+            self.calls = 0
+
+        async def verify_artist_tracks(self, artist, limit):
+            self.calls += 1
+            assert limit == 3
+            return []
+
+    class StubCovers:
+        async def find_cover(self, release_id, release_group_id=None):
+            return None
+
+    provider = StubMusicBrainz()
+    candidates = [CandidateArtist(name=f"Artist {index}", source="stub") for index in range(20)]
+    run(VerificationService(provider, StubCovers()).verify(candidates, tracks_per_artist=25))
+
+    assert provider.calls == 8
