@@ -24,5 +24,6 @@ describe("runAgent", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.tool_choice).toBe("required");
+    expect(body.messages[1].content).toContain("선택한 조건에 맞는 음악을 추천해줘.");
   });
 });

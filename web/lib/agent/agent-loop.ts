@@ -20,7 +20,7 @@ const progress:Record<string,number>={discover_music_candidates:20,expand_simila
 async function chat(messages:Message[], requireTool:boolean) {
   const key=process.env.NVIDIA_API_KEY; if(!key) throw new Error("NVIDIA_API_KEY_MISSING");
   let response:Response;
-  try{response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},signal:AbortSignal.timeout(60_000),body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:requireTool?"required":"auto",temperature:.2})});}
+  try{response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},signal:AbortSignal.timeout(60_000),body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:requireTool?"required":"auto",temperature:.2,max_tokens:512})});}
   catch(error){if(error instanceof Error&&error.name==="TimeoutError")throw new Error("NVIDIA_TIMEOUT");throw error;}
   if(!response.ok) throw new Error(`NVIDIA_${response.status}`);
   const data=await response.json() as {choices:Array<{message:{content:string|null;tool_calls?:ToolCall[]}}>};
@@ -28,7 +28,7 @@ async function chat(messages:Message[], requireTool:boolean) {
 }
 
 export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>{
-  const messages:Message[]=[{role:"system",content:SYSTEM_PROMPT},{role:"user",content:JSON.stringify(request)}];
+  const messages:Message[]=[{role:"system",content:SYSTEM_PROMPT},{role:"user",content:JSON.stringify({...request,free_text:request.free_text?.trim()||"선택한 조건에 맞는 음악을 추천해줘."})}];
   const seen=new Set<string>(); let playlist:PlaylistDraft|undefined;
   yield {type:"status",step:"analyze",message:"요청 조건을 분석하고 있습니다.",progress:5};
   for(let turn=0;turn<8;turn++){
