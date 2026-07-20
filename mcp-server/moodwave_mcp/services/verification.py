@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable
 
 from moodwave_mcp.models import CandidateArtist, VerifiedTrack
 
 from .cache import TTLCache, get_or_create_async
+
+logger = logging.getLogger("moodwave.verification")
 
 
 class VerificationService:
@@ -40,13 +43,16 @@ class VerificationService:
                         bounded_per_artist,
                     ),
                 )
-            except Exception:
+            except Exception as error:
+                logger.warning("track verification failed artist=%s error=%s detail=%s", artist.name, type(error).__name__, error)
                 continue
             covers = await asyncio.gather(
                 *(self.cover_art.find_cover(track.release_id, track.release_group_id) for track in tracks),
                 return_exceptions=True,
             )
             for track, cover in zip(tracks, covers, strict=True):
+                if isinstance(cover, Exception):
+                    logger.warning("cover lookup failed recording_id=%s error=%s detail=%s", track.recording_id, type(cover).__name__, cover)
                 if track.recording_id in seen:
                     continue
                 seen.add(track.recording_id)

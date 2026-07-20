@@ -9,5 +9,6 @@ __pycache__/
 .pytest-*/
 pytest-cache-files-*/
 *.db
+*.log
 .env
 

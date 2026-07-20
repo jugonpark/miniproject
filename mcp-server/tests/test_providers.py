@@ -599,7 +599,7 @@ def test_discovery_cache_caller_cancellation_does_not_cancel_shared_task():
     assert result == [CandidateArtist(name="Shared", source="stub")]
 
 
-def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_none():
+def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_none(caplog):
     class StubMusicBrainz:
         async def verify_artist_tracks(self, artist, limit):
             if artist == "Broken":
@@ -622,6 +622,8 @@ def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_no
     assert tracks[0].cover_image_url is None
     assert tracks[0].tags == ["calm"]
     assert tracks[0].popularity_score == 7
+    assert "track verification failed artist=Broken error=ProviderError" in caplog.text
+    assert "cover lookup failed recording_id=ok-1 error=ProviderError" in caplog.text
 
 
 def test_verification_cache_evicts_failed_artist_tasks_for_recovery():
