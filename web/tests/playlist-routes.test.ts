@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-vi.mock("@/lib/mcp/client", () => ({ callTool: vi.fn() }));
+vi.mock("@/lib/mcp/client", () => ({
+  callTool: vi.fn(),
+  McpToolError: class McpToolError extends Error {
+    readonly notFound: boolean;
+    constructor(message: string) {
+      super(message);
+      this.notFound = /\bnot found\b/i.test(message);
+    }
+  },
+  McpResponseError: class McpResponseError extends Error {},
+  McpTransportError: class McpTransportError extends Error {},
+}));
 
 import { DELETE, GET as getOne } from "@/app/api/playlists/[id]/route";
 import { GET as list, POST as save } from "@/app/api/playlists/route";
-import { callTool } from "@/lib/mcp/client";
+import { callTool, McpResponseError, McpToolError, McpTransportError } from "@/lib/mcp/client";
 
 const mockedCallTool = vi.mocked(callTool);
 const draft = {
@@ -56,6 +67,7 @@ describe("playlist collection route", () => {
     }));
 
     expect(response.status).toBe(502);
+    expect(mockedCallTool).toHaveBeenCalledTimes(1);
     expect(await response.json()).toEqual({ error: "MCP 서버 응답이 올바르지 않습니다." });
   });
 
@@ -109,13 +121,38 @@ describe("single playlist route", () => {
     expect(mockedCallTool).not.toHaveBeenCalled();
   });
 
+  test.each(["+1", "01", "1e2", " 1", "9007199254740993"])(
+    "rejects non-canonical decimal id %s", async (id) => {
+      const response = await getOne(new Request(`http://localhost/api/playlists/${id}`), context(id));
+      expect(response.status).toBe(400);
+      expect(mockedCallTool).not.toHaveBeenCalled();
+    },
+  );
+
   test("maps missing playlists to 404", async () => {
     mockedCallTool.mockImplementationOnce(async () => {
-      throw new Error("playlist 99 was not found");
+      throw new McpToolError("playlist 99 was not found");
     });
     const response = await getOne(new Request("http://localhost/api/playlists/99"), context("99"));
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "재생목록을 찾을 수 없습니다." });
+  });
+
+  test("does not map transport Not Found text to 404", async () => {
+    mockedCallTool.mockImplementationOnce(async () => {
+      throw new McpTransportError("upstream returned 404 Not Found");
+    });
+    const response = await getOne(new Request("http://localhost/api/playlists/99"), context("99"));
+    expect(response.status).toBe(500);
+  });
+
+  test("maps typed upstream response failures to 502", async () => {
+    mockedCallTool.mockImplementationOnce(async () => {
+      throw new McpResponseError("invalid JSON");
+    });
+    const response = await getOne(new Request("http://localhost/api/playlists/1"), context("1"));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "MCP 서버 응답이 올바르지 않습니다." });
   });
 
   test("rejects a malformed single-playlist response", async () => {

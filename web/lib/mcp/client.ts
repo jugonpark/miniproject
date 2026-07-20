@@ -1,10 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 let clientPromise: Promise<Client> | undefined;
 
-class ToolCallError extends Error {}
+export class McpToolError extends Error {
+  readonly notFound: boolean;
+
+  constructor(message: string) {
+    super(message);
+    this.notFound = /\bnot found\b/i.test(message);
+  }
+}
+
+export class McpResponseError extends Error {}
+export class McpTransportError extends Error {}
 
 async function connect(): Promise<Client> {
   const url = process.env.MCP_SERVER_URL;
@@ -19,10 +29,13 @@ function getClient(): Promise<Client> {
   return (clientPromise ??= connect());
 }
 
-function outputOf(result: CallToolResult): unknown {
+function outputOf(raw: unknown): unknown {
+  const parsed = CallToolResultSchema.safeParse(raw);
+  if (!parsed.success) throw new McpResponseError("MCP returned an invalid result");
+  const result = parsed.data;
   if (result.isError) {
     const message = result.content.find((item) => item.type === "text");
-    throw new ToolCallError(message?.type === "text" ? message.text : "MCP tool failed");
+    throw new McpToolError(message?.type === "text" ? message.text : "MCP tool failed");
   }
   if (result.structuredContent) {
     return "result" in result.structuredContent
@@ -31,20 +44,33 @@ function outputOf(result: CallToolResult): unknown {
   }
   const text = result.content.find((item) => item.type === "text");
   if (text?.type !== "text") return null;
-  return JSON.parse(text.text) as unknown;
+  try {
+    return JSON.parse(text.text) as unknown;
+  } catch {
+    throw new McpResponseError("MCP returned invalid JSON");
+  }
+}
+
+async function discardClient(used: Promise<Client>): Promise<void> {
+  if (clientPromise !== used) return;
+  clientPromise = undefined;
+  try {
+    await (await used).close();
+  } catch {
+    // A failed connection has nothing usable to close.
+  }
 }
 
 export async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const used = getClient();
     try {
-      const result = await (await getClient()).callTool({ name, arguments: args });
-      return outputOf(result as CallToolResult) as T;
+      const result = await (await used).callTool({ name, arguments: args });
+      return outputOf(result) as T;
     } catch (error) {
-      if (error instanceof ToolCallError) throw error;
-      if (attempt === 1) throw error;
-      const stale = clientPromise;
-      clientPromise = undefined;
-      void stale?.then((client) => client.close()).catch(() => undefined);
+      if (error instanceof McpToolError || error instanceof McpResponseError) throw error;
+      if (attempt === 1) throw new McpTransportError("MCP request failed", { cause: error });
+      await discardClient(used);
     }
   }
   throw new Error("MCP tool failed");

@@ -61,10 +61,38 @@ describe("callTool", () => {
       isError: true,
       content: [{ type: "text", text: "playlist 99 was not found" }],
     });
-    const { callTool } = await import("@/lib/mcp/client");
+    const { callTool, McpToolError } = await import("@/lib/mcp/client");
 
-    await expect(callTool("get_playlist", { playlist_id: 99 })).rejects.toThrow("not found");
+    await expect(callTool("get_playlist", { playlist_id: 99 })).rejects.toBeInstanceOf(McpToolError);
     expect(mocks.clientConstructor).toHaveBeenCalledTimes(1);
     expect(mocks.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not repeat a successful mutation when its response cannot be decoded", async () => {
+    mocks.callTool.mockResolvedValue({
+      isError: false,
+      content: [{ type: "text", text: "not-json" }],
+    });
+    const { callTool, McpResponseError } = await import("@/lib/mcp/client");
+
+    await expect(callTool("save_playlist", {})).rejects.toBeInstanceOf(McpResponseError);
+    expect(mocks.callTool).toHaveBeenCalledTimes(1);
+    expect(mocks.clientConstructor).toHaveBeenCalledTimes(1);
+  });
+
+  test("two concurrent failures replace one exact client and close it once", async () => {
+    mocks.callTool
+      .mockImplementationOnce(async () => { throw new Error("connection lost a"); })
+      .mockImplementationOnce(async () => { throw new Error("connection lost b"); })
+      .mockResolvedValue({ isError: false, content: [{ type: "text", text: "[]" }] });
+    const { callTool } = await import("@/lib/mcp/client");
+
+    await expect(Promise.all([
+      callTool("list_playlists", { offset: 0 }),
+      callTool("list_playlists", { offset: 1 }),
+    ])).resolves.toEqual([[], []]);
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledTimes(1));
+    expect(mocks.clientConstructor).toHaveBeenCalledTimes(2);
+    expect(mocks.callTool).toHaveBeenCalledTimes(4);
   });
 });

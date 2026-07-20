@@ -1,7 +1,7 @@
 # Task 5 Report: Web contracts and playlist proxy routes
 
-Status: complete, pending reviewer gate
-Commit: `feat: add web contracts and MCP playlist routes` (this commit)
+Status: review fixes complete, pending re-review
+Commits: `22fe32b` and `fix: harden web contracts and MCP retries` (this commit)
 
 ## Implemented
 
@@ -45,3 +45,26 @@ Exit code: 0
 
 - `npm.cmd audit --json` reports two moderate findings for Next.js's bundled PostCSS `<8.5.10`. npm currently suggests an incompatible Next 9 downgrade, so no breaking audit fix was applied.
 - Automated tests mock the MCP connection; live FastMCP interoperability remains for the later integrated smoke test.
+
+## Review rejection fixes
+
+- The singleton retry path now associates failure cleanup with the exact promise used by that call, resets it only while it remains current, and closes it once across concurrent failures.
+- Typed `McpToolError`, `McpResponseError`, and `McpTransportError` separate tool/response failures from retryable transport failures. Decode failures never repeat a completed tool call.
+- Missing playlists map to 404 only from typed tool errors; transport text containing `Not Found` remains a safe 500.
+- TypeScript and Python now accept free-text-only requests and reject only when both condition selections and trimmed free text are empty.
+- Playlist URLs accept only HTTP(S), and path IDs accept only canonical positive safe decimal integers.
+
+Review-fix red evidence: focused web tests failed 12 checks covering all five findings; focused Python tests failed free-text-only construction.
+
+Review-fix final verification:
+
+```text
+npm.cmd test -- --run -> 3 files passed, 36 tests passed
+npm.cmd run typecheck -> exit 0
+python -m pytest -q -p no:cacheprovider -> 48 passed in 0.76s
+```
+
+Authorized Python paths added to ownership for this fix:
+
+- `mcp-server/moodwave_mcp/models.py` (`MusicRequest` only)
+- `mcp-server/tests/test_models.py`

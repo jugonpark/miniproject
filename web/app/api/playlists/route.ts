@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { callTool } from "@/lib/mcp/client";
+import { callTool, McpResponseError, McpToolError } from "@/lib/mcp/client";
 import { playlistDraftSchema, savedPlaylistSchema } from "@/lib/schemas/playlist";
 
 const saveSchema = z.object({
@@ -24,7 +24,11 @@ export async function POST(request: Request) {
     const result = savedPlaylistSchema.parse(await callTool("save_playlist", input));
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (
+      error instanceof z.ZodError ||
+      error instanceof McpResponseError ||
+      error instanceof McpToolError
+    ) {
       return NextResponse.json({ error: "MCP 서버 응답이 올바르지 않습니다." }, { status: 502 });
     }
     return NextResponse.json({ error: "재생목록을 저장하지 못했습니다." }, { status: 500 });
@@ -43,7 +47,11 @@ export async function GET(request: Request) {
     const result = z.array(savedPlaylistSchema).parse(await callTool("list_playlists", paging));
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (
+      error instanceof z.ZodError ||
+      error instanceof McpResponseError ||
+      error instanceof McpToolError
+    ) {
       return NextResponse.json({ error: "MCP 서버 응답이 올바르지 않습니다." }, { status: 502 });
     }
     return NextResponse.json({ error: "재생목록을 불러오지 못했습니다." }, { status: 500 });

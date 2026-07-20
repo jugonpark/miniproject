@@ -36,12 +36,27 @@ describe("musicRequestSchema", () => {
   test("rejects an empty request", () => {
     expect(() => musicRequestSchema.parse({ conditions: [], free_text: "   " })).toThrow();
   });
+
+  test("accepts a free-text-only request", () => {
+    expect(musicRequestSchema.parse({ conditions: [], free_text: "late-night coding" })).toMatchObject({
+      conditions: [], free_text: "late-night coding", region: "mixed", count: 10,
+    });
+  });
 });
 
 describe("playlist schemas", () => {
   test("rejects zero-based track positions", () => {
     expect(() => playlistDraftSchema.parse({
       title: "Focus", request, tracks: [{ ...track, position: 0 }],
+    })).toThrow();
+  });
+
+  test.each([
+    ["cover_url", "data:image/png;base64,AAAA"],
+    ["youtube_music_url", "file:///tmp/song"],
+  ])("rejects non-http %s", (field, value) => {
+    expect(() => playlistDraftSchema.parse({
+      title: "Focus", request, tracks: [{ ...track, [field]: value }],
     })).toThrow();
   });
 

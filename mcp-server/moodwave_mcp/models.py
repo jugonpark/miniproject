@@ -3,15 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 
 class MusicRequest(BaseModel):
-    conditions: list[str] = Field(min_length=1)
+    conditions: list[str] = Field(default_factory=list)
     region: Literal["domestic", "global", "mixed"] = "mixed"
     free_text: str | None = None
     familiar_artists: list[str] = Field(default_factory=list)
     count: Literal[5, 10, 15] = 10
+
+    @model_validator(mode="after")
+    def require_condition_or_free_text(self) -> "MusicRequest":
+        if not any(value.strip() for value in self.conditions) and not (
+            self.free_text or ""
+        ).strip():
+            raise ValueError("conditions or free_text is required")
+        return self
 
 
 class CandidateArtist(BaseModel):

@@ -2,6 +2,11 @@ import { z } from "zod";
 
 import { musicRequestSchema } from "./music";
 
+const httpUrlSchema = z.url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === "http:" || protocol === "https:";
+});
+
 export const recommendedTrackSchema = z.object({
   position: z.number().int().min(1),
   recording_id: z.string().min(1),
@@ -10,8 +15,8 @@ export const recommendedTrackSchema = z.object({
   artist_id: z.string().nullable().default(null),
   release_id: z.string().nullable().default(null),
   release_title: z.string().nullable().default(null),
-  cover_url: z.url().nullable().default(null),
-  youtube_music_url: z.url(),
+  cover_url: httpUrlSchema.nullable().default(null),
+  youtube_music_url: httpUrlSchema,
   familiar: z.boolean(),
 });
 
