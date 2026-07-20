@@ -40,13 +40,21 @@ class Database:
                     artist_id TEXT,
                     release_id TEXT,
                     release_title TEXT,
+                    release_year INTEGER,
                     cover_url TEXT,
+                    tags_json TEXT NOT NULL DEFAULT '[]',
+                    discovery_type TEXT NOT NULL DEFAULT 'discovery',
+                    recommendation_reason TEXT NOT NULL DEFAULT '',
                     youtube_music_url TEXT NOT NULL,
                     familiar INTEGER NOT NULL,
                     UNIQUE (playlist_id, position)
                 );
                 """
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(playlist_tracks)")}
+            for name, definition in {"release_year": "INTEGER", "tags_json": "TEXT NOT NULL DEFAULT '[]'", "discovery_type": "TEXT NOT NULL DEFAULT 'discovery'", "recommendation_reason": "TEXT NOT NULL DEFAULT ''"}.items():
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE playlist_tracks ADD COLUMN {name} {definition}")
             for row in connection.execute(
                 "SELECT DISTINCT playlist_id FROM playlist_tracks WHERE position = 0"
             ):
@@ -114,8 +122,9 @@ class Database:
             """
             INSERT INTO playlist_tracks (
                 playlist_id, position, recording_id, title, artist, artist_id,
-                release_id, release_title, cover_url, youtube_music_url, familiar
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                release_id, release_title, release_year, cover_url, tags_json,
+                discovery_type, recommendation_reason, youtube_music_url, familiar
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -127,7 +136,11 @@ class Database:
                     track.artist_id,
                     track.release_id,
                     track.release_title,
+                    track.release_year,
                     str(track.cover_url) if track.cover_url is not None else None,
+                    json.dumps(track.tags),
+                    track.discovery_type,
+                    track.recommendation_reason,
                     str(track.youtube_music_url),
                     int(track.familiar),
                 )
@@ -178,7 +191,11 @@ class Database:
                     artist_id=track["artist_id"],
                     release_id=track["release_id"],
                     release_title=track["release_title"],
+                    release_year=track["release_year"],
                     cover_url=track["cover_url"],
+                    tags=json.loads(track["tags_json"]),
+                    discovery_type=track["discovery_type"],
+                    recommendation_reason=track["recommendation_reason"],
                     youtube_music_url=track["youtube_music_url"],
                     familiar=bool(track["familiar"]),
                 )

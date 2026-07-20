@@ -1,2 +1,13 @@
 .worktrees/
+.superpowers/
+_workspace/
+docs/harness/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest-*/
+pytest-cache-files-*/
+*.db
+.env
 

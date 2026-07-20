@@ -99,7 +99,11 @@ class RecommendedTrack(BaseModel):
     artist_id: str | None = None
     release_id: str | None = None
     release_title: str | None = None
+    release_year: int | None = None
     cover_url: HttpUrl | None = None
+    tags: list[str] = Field(default_factory=list)
+    discovery_type: Literal["familiar", "discovery"] = "discovery"
+    recommendation_reason: str = ""
     youtube_music_url: HttpUrl
     familiar: bool
 

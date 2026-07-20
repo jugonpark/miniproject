@@ -58,7 +58,11 @@ def compose_playlist(
             artist_id=track.artist_id,
             release_id=track.release_id,
             release_title=track.release_title,
+            release_year=track.release_year,
             cover_url=track.cover_url,
+            tags=track.tags,
+            discovery_type=("familiar" if track.artist.strip().casefold() in familiar_artists else "discovery"),
+            recommendation_reason=(f"{', '.join(request.conditions) or '요청한 분위기'}에 어울리는 {', '.join(track.tags[:2]) or '음악적 특성'}을 가진 곡입니다."),
             youtube_music_url=create_youtube_music_url(track.title, track.artist),
             familiar=track.artist.strip().casefold() in familiar_artists,
         )

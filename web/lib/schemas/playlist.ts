@@ -15,7 +15,11 @@ export const recommendedTrackSchema = z.object({
   artist_id: z.string().nullable().default(null),
   release_id: z.string().nullable().default(null),
   release_title: z.string().nullable().default(null),
+  release_year: z.number().int().nullable().optional(),
   cover_url: httpUrlSchema.nullable().default(null),
+  tags: z.array(z.string()).optional(),
+  discovery_type: z.enum(["familiar", "discovery"]).optional(),
+  recommendation_reason: z.string().optional(),
   youtube_music_url: httpUrlSchema,
   familiar: z.boolean(),
 });
