@@ -16,9 +16,9 @@ const definitions = [
 
 const label:Record<string,string>={discover_music_candidates:"관련 아티스트를 찾고 있습니다.",expand_similar_artists:"새로운 음악을 더 찾고 있습니다.",verify_music_tracks:"실제로 발매된 곡을 검증하고 있습니다.",compose_playlist:"플레이리스트를 구성하고 있습니다."};
 
-async function chat(messages:Message[]) {
+async function chat(messages:Message[], requireTool:boolean) {
   const key=process.env.NVIDIA_API_KEY; if(!key) throw new Error("NVIDIA_API_KEY_MISSING");
-  const response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:"auto",temperature:.2})});
+  const response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:requireTool?"required":"auto",temperature:.2})});
   if(!response.ok) throw new Error(`NVIDIA_${response.status}`);
   const data=await response.json() as {choices:Array<{message:{content:string|null;tool_calls?:ToolCall[]}}>};
   return data.choices[0]?.message;
@@ -29,7 +29,7 @@ export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>
   const seen=new Set<string>(); let playlist:PlaylistDraft|undefined;
   yield {type:"status",step:"analyze",message:"요청 조건을 분석하고 있습니다."};
   for(let turn=0;turn<8;turn++){
-    const answer=await chat(messages); if(!answer) throw new Error("EMPTY_LLM_RESPONSE");
+    const answer=await chat(messages,!playlist); if(!answer) throw new Error("EMPTY_LLM_RESPONSE");
     if(!answer.tool_calls?.length){
       const content=answer.content?.trim()||`검증된 곡 ${playlist?.tracks.length??0}곡을 찾았습니다.`;
       for(const delta of content.match(/.{1,16}/gs)??[]) yield {type:"text_delta",delta};
