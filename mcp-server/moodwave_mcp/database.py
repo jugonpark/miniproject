@@ -60,18 +60,27 @@ class Database:
                     playlist_id = existing["id"]
                 else:
                     playlist_id = self._insert_playlist(connection, draft, idempotency_key)
+                    if playlist_id is None:
+                        playlist_id = connection.execute(
+                            "SELECT id FROM playlists WHERE idempotency_key = ?",
+                            (idempotency_key,),
+                        ).fetchone()["id"]
             else:
                 playlist_id = self._insert_playlist(connection, draft, None)
+                assert playlist_id is not None
         return self.get_playlist(playlist_id)
 
     def _insert_playlist(
         self, connection: sqlite3.Connection, draft: PlaylistDraft, idempotency_key: str | None
-    ) -> int:
+    ) -> int | None:
         created_at = datetime.now(UTC).isoformat()
         cursor = connection.execute(
             """
-            INSERT INTO playlists (title, description, request_json, created_at, idempotency_key)
+            INSERT INTO playlists (
+                title, description, request_json, created_at, idempotency_key
+            )
             VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(idempotency_key) DO NOTHING
             """,
             (
                 draft.title,
@@ -81,6 +90,8 @@ class Database:
                 idempotency_key,
             ),
         )
+        if cursor.rowcount == 0:
+            return None
         playlist_id = cursor.lastrowid
         assert playlist_id is not None
         connection.executemany(

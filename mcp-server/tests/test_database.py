@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -81,6 +83,28 @@ def test_list_playlists_is_newest_first_and_supports_paging(tmp_path):
         first.id,
     ]
     assert database.list_playlists(limit=1, offset=1) == [first]
+
+
+def test_concurrent_idempotency_keys_return_the_same_playlist(tmp_path):
+    barrier = Barrier(2)
+
+    class RacingDatabase(Database):
+        def _insert_playlist(self, connection, draft, idempotency_key):
+            barrier.wait()
+            return super()._insert_playlist(connection, draft, idempotency_key)
+
+    database = RacingDatabase(tmp_path / "moodwave.db")
+    database.initialize()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: database.save_playlist(make_draft("Focus"), "save-focus"),
+                range(2),
+            )
+        )
+
+    assert results[0] == results[1]
 
 
 def test_delete_playlist_cascades_tracks_and_missing_ids_raise_lookup_error(tmp_path):
