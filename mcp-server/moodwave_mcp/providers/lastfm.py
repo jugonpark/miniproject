@@ -44,7 +44,7 @@ class LastFmProvider:
         for tag, payload in zip(requested_tags, payloads):
             artists = [] if isinstance(payload, BaseException) else _nested_list(payload, "topartists", "artist")
             counts[tag] = len(artists)
-            for item in artists:
+            for rank, item in enumerate(artists, start=1):
                 if not isinstance(item, dict):
                     continue
                 name = str(item.get("name", "")).strip()
@@ -83,16 +83,16 @@ class LastFmProvider:
         for (tag, categories, _), payload in zip(requests, payloads):
             artists = [] if isinstance(payload, BaseException) else _nested_list(payload, "topartists", "artist")
             counts[tag] = len(artists)
-            for item in artists:
+            for rank, item in enumerate(artists, start=1):
                 if not isinstance(item, dict) or not str(item.get("name") or "").strip():
                     continue
                 name = str(item["name"]).strip()
                 key = name.casefold()
                 current = merged.get(key)
                 if current is None:
-                    merged[key] = CandidateArtist(name=name, source="lastfm:tag", tags=[tag], popularity=_integer(item.get("listeners") or item.get("playcount")), matched_tags=[tag], matched_categories=categories)
+                    merged[key] = CandidateArtist(name=name, source="lastfm:tag", tags=[tag], popularity=_integer(item.get("listeners") or item.get("playcount")), matched_tags=[tag], matched_categories=categories, tag_weights={tag: 1.0}, matched_clusters=[tag], best_lastfm_rank=rank, source_pages=[1])
                 else:
-                    merged[key] = current.model_copy(update={"tags": list(dict.fromkeys([*current.tags, tag])), "matched_tags": list(dict.fromkeys([*current.matched_tags, tag])), "matched_categories": list(dict.fromkeys([*current.matched_categories, *categories])), "appearance_count": current.appearance_count + 1, "popularity": max(current.popularity, _integer(item.get("listeners") or item.get("playcount")))})
+                    merged[key] = current.model_copy(update={"tags": list(dict.fromkeys([*current.tags, tag])), "matched_tags": list(dict.fromkeys([*current.matched_tags, tag])), "matched_categories": list(dict.fromkeys([*current.matched_categories, *categories])), "matched_clusters": list(dict.fromkeys([*current.matched_clusters, tag])), "tag_weights": {**current.tag_weights, tag: max(current.tag_weights.get(tag, 0), 1.0)}, "appearance_count": current.appearance_count + 1, "best_lastfm_rank": min(current.best_lastfm_rank or rank, rank), "popularity": max(current.popularity, _integer(item.get("listeners") or item.get("playcount")))})
         ranked = sorted(merged.values(), key=lambda artist: (-artist.appearance_count, -artist.popularity, artist.name.casefold()))
         logging.getLogger("moodwave").warning("lastfm_grouped_discovery=%s", json.dumps({"requestedTagsByCategory": groups, "quotas": quotas, "resultCountByTag": counts, "discoveredArtists": [artist.name for artist in ranked[:bounded]], "artistEvidence": [artist.model_dump(include={"name", "matched_tags", "matched_categories", "appearance_count"}) for artist in ranked[:bounded]]}, ensure_ascii=False))
         return ranked[:bounded]
@@ -151,6 +151,13 @@ class LastFmProvider:
             if title and name:
                 results.append(TrackCandidate(artist=name, title=title, source="lastfm:toptracks"))
         return results
+
+    async def track_top_tags(self, artist: str, track: str) -> list[str]:
+        try:
+            payload = await self._call("track.gettoptags", artist=artist, track=track)
+        except ProviderError:
+            return []
+        return normalize_tags(str(item.get("name", "")) for item in _nested_list(payload, "toptags", "tag")[:10] if isinstance(item, dict))
 
     async def _top_tags(self, artist: str) -> list[str]:
         payload = await self._call("artist.gettoptags", artist=artist)

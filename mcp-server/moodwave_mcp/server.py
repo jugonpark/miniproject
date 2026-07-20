@@ -49,7 +49,7 @@ async def discover_music_candidates(
         raise RuntimeError("LASTFM_API_KEY is required")
     values = [*moods, *activities, *([vocal_preference] if vocal_preference else [])]
     groups = discovery_tags_by_category(region, values, recommendation_intent)
-    quotas = {"scene": 12, "mood": 8, "activity": 6, "genre": 6, "vocal": 4}
+    quotas = {"current_state": 6, "target_state": 10, "transition": 4, "activity": 6, "scene": 8, "genre": 6, "vocal": 4}
     candidates = await service.discover_grouped(groups, quotas, limit)
     if region == "domestic" and not groups.get("scene") and not groups.get("genre"):
         country_candidates = await service.discover_country("Korea, Republic of", limit)
@@ -61,7 +61,7 @@ async def discover_music_candidates(
         candidates = sorted(merged.values(), key=lambda candidate: (-(curated_origin(candidate.name) == "VERIFIED_KR"), -("country_seed" in candidate.matched_categories), -candidate.appearance_count, -candidate.popularity))[:limit]
     logging.getLogger("moodwave").warning(
         "discovery_summary=%s",
-        json.dumps({"requestId": request_id, "requestedTagsByCategory": groups, "rawRequest": (recommendation_intent or {}).get("rawRequest", ""), "hardConstraints": (recommendation_intent or {}).get("hardConstraints", {}), "preferences": (recommendation_intent or {}).get("preferences", {}), "emotionalArc": (recommendation_intent or {}).get("emotionalArc", {}), "priorityOrder": (recommendation_intent or {}).get("priorityOrder", []), "rawCandidates": len(candidates), "deduplicatedCandidates": len(candidates), "candidatesBeforeDomesticFilter": len(candidates), "candidatesAfterDomesticFilter": len(candidates)}, ensure_ascii=False),
+        json.dumps({"requestId": request_id, "requestedTagsByCategory": groups, "lastFmTagPlan": (recommendation_intent or {}).get("lastFmTagPlan", {}), "rawRequest": (recommendation_intent or {}).get("rawRequest", ""), "hardConstraints": (recommendation_intent or {}).get("hardConstraints", {}), "preferences": (recommendation_intent or {}).get("preferences", {}), "emotionalArc": (recommendation_intent or {}).get("emotionalArc", {}), "priorityOrder": (recommendation_intent or {}).get("priorityOrder", []), "rawCandidates": len(candidates), "deduplicatedCandidates": len(candidates), "candidatesBeforeDomesticFilter": len(candidates), "candidatesAfterDomesticFilter": len(candidates)}, ensure_ascii=False),
     )
     return candidates
 
@@ -129,6 +129,7 @@ def compose_playlist(
     scored = evaluate_tracks(verified_tracks, recommendation_intent or {}) if recommendation_intent else []
     draft = compose(verified_tracks, request, selected_candidates=selected)
     logging.getLogger("moodwave").warning("recommendation_summary=%s", json.dumps({"requestId": request_id, "topScoredCandidates": [{"candidateId": item.features.candidate_id, "artist": item.track.artist_name, "track": item.track.track_title, "totalScore": item.features.total_score, "chatIntentScore": item.features.chat_intent_score, "chatIntentBreakdown": item.features.chat_intent_breakdown, "availableDimensions": item.features.available_dimensions, "scoreReasons": item.features.score_reasons} for item in scored[:20]], "finalCandidateIds": [track.candidate_id for track in draft.tracks], "finalPlaylistTracks": [{"artist": track.artist, "track": track.title, "role": track.role} for track in draft.tracks], "status": draft.recommendation_status}, ensure_ascii=False))
+    logging.getLogger("moodwave").warning("recommendation_evidence=%s", json.dumps({"requestId": request_id, "trackEvidence": [{"candidateId": item.track.candidate_id, "trackTopTags": item.track.track_top_tags, "discoveryTags": item.track.discovery_tags, "positiveTagMatches": item.features.positive_tag_matches, "negativeTagMatches": item.features.negative_tag_matches, "clusterScores": item.features.cluster_scores, "finalTrackScore": item.features.total_score} for item in scored], "artistDiversityResult": len({track.artist.casefold() for track in draft.tracks}), "finalCandidateIds": [track.candidate_id for track in draft.tracks]}, ensure_ascii=False))
     if not draft.tracks:
         return {"success": False, "code": "INSUFFICIENT_VERIFIED_CANDIDATES", "message": "조건에 맞는 국내 인디 음악을 충분히 확인하지 못했어요. 확인된 곡만 만나보거나 검색 범위를 조금 넓힐 수 있어요.", "choices": ["확인된 국내 인디 곡만 보기", "다른 국내 장르까지 넓히기", "선택 수정하기"]}
     return draft

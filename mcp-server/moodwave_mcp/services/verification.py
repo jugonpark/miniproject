@@ -155,11 +155,24 @@ class VerificationService:
                 seen.add(track.recording_id)
                 seen_names.add(name_key)
                 cover_url = track.cover_image_url if isinstance(cover, Exception) or cover is None else cover
+                track_tags: list[str] = []
+                top_tags = getattr(self.track_provider, "track_top_tags", None)
+                if top_tags:
+                    try:
+                        track_tags = await top_tags(track.artist_name, track.track_title)
+                    except Exception as error:
+                        logger.warning("track tags failed artist=%s track=%s error=%s", track.artist_name, track.track_title, type(error).__name__)
+                discovery_tags = list(dict.fromkeys([*artist.matched_tags, *artist.tags]))
+                evidence = {tag: .5 for tag in discovery_tags}
+                evidence.update({tag: 1.0 for tag in track_tags})
                 enriched = VerifiedTrack.model_validate(
                         {
                             **track.model_dump(),
                             "cover_image_url": cover_url,
-                            "tags": artist.tags,
+                            "tags": list(dict.fromkeys([*track_tags, *discovery_tags])),
+                            "track_top_tags": track_tags,
+                            "discovery_tags": discovery_tags,
+                            "tag_evidence": evidence,
                             "popularity_score": artist.popularity,
                             "artist_country": artist_country,
                             "origin_status": origin_status,

@@ -2,7 +2,7 @@ import { callTool, McpTransportError } from "@/lib/mcp/client";
 import type { MusicRequest } from "@/lib/schemas/music";
 import { playlistDraftSchema, type PlaylistDraft } from "@/lib/schemas/playlist";
 import { SYSTEM_PROMPT } from "./system-prompt";
-import { fallbackIntent, mergeIntent, recommendationIntentSchema, type RecommendationIntent } from "./recommendation-intent";
+import { applyIntentPatch, fallbackIntent, inferIntentPatch, mergeIntent, recommendationIntentSchema, revisionScope, type RecommendationIntent, type RecommendationSession } from "./recommendation-intent";
 import { fallbackCandidateSelection, validateCandidateSelection, type CandidateSelection } from "./candidate-selection";
 import { safeFinalNarrative } from "./final-narrative";
 
@@ -52,8 +52,11 @@ async function chat(messages:Message[], tools:ToolDefinition[], requestId:string
 
 export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>{
   const requestId=crypto.randomUUID();
-  const messages:Message[]=[{role:"system",content:SYSTEM_PROMPT},{role:"user",content:JSON.stringify({...request,free_text:request.free_text?.trim()||"선택한 조건에 맞는 음악을 추천해줘."})}];
-  const seen=new Set<string>();const completed=new Set<string>();const expand=/(새로운|발견|유명한 곡만|new|discover)/i.test(request.free_text??"");let playlist:PlaylistDraft|undefined;let verifiedTracks:unknown;let discoveredCandidates:unknown[]=[];let discoveredArtists:string[]=[];let intent:RecommendationIntent=fallbackIntent(request);
+  const prior=request.recommendation_session as RecommendationSession|undefined;const userText=request.free_text?.trim()||"선택한 조건에 맞는 음악을 추천해줘.";const fallback=fallbackIntent(request);const parsedPrior=recommendationIntentSchema.safeParse(prior?.currentIntent);const intentPatch=parsedPrior.success?inferIntentPatch(userText):null;let intent:RecommendationIntent=parsedPrior.success&&intentPatch?applyIntentPatch(parsedPrior.data,intentPatch,userText):fallback;
+  const messageId=crypto.randomUUID();const session:RecommendationSession={sessionId:prior?.sessionId??crypto.randomUUID(),messages:[...(prior?.messages??[]),{id:messageId,role:"user",content:userText,createdAt:new Date().toISOString()}],uiSelections:prior?.uiSelections??{region:request.region,conditions:request.conditions},currentIntent:intent,previousIntent:parsedPrior.success?parsedPrior.data:undefined,currentPlaylistCandidateIds:[],revisionCount:(prior?.revisionCount??0)+(prior?1:0),appliedIntentChanges:[...(prior?.appliedIntentChanges??[]),...(intentPatch?[{messageId,summary:intentPatch.userMeaningSummary,addedConstraints:Object.values(intentPatch.add??{}).flat(),removedConstraints:Object.values(intentPatch.remove??{}).flat(),changedPreferences:Object.keys(intentPatch.set??{}),createdAt:new Date().toISOString()}]:[])]};
+  const scope=prior?revisionScope(userText):"REDISCOVER";yield {type:"revision_status",state:prior?"UPDATING_INTENT":"READING_MESSAGE",message:prior?"이전 선택에 새 요청을 반영했어요":"요청하신 내용을 살펴보는 중"};yield {type:"insight",stage:"수정 범위",message:scope};
+  const messages:Message[]=[{role:"system",content:SYSTEM_PROMPT},{role:"user",content:JSON.stringify({uiSelections:session.uiSelections,chatMessages:session.messages,currentIntent:intent,intentPatch,revisionScope:scope})}];
+  const seen=new Set<string>();const completed=new Set<string>();const expand=/(새로운|발견|유명한 곡만|new|discover)/i.test(userText);let playlist:PlaylistDraft|undefined;let verifiedTracks:unknown;let discoveredCandidates:unknown[]=[];let discoveredArtists:string[]=[];
   yield {type:"status",step:"analyze",message:"요청 조건을 분석하고 있습니다.",progress:5};
   for(let turn=0;turn<8;turn++){
     if(completed.has("discover_music_candidates")&&(!expand||completed.has("expand_similar_artists"))&&!completed.has("verify_music_tracks")){
@@ -74,7 +77,7 @@ export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>
       if(tools.length)throw new Error("NVIDIA_TOOL_CALL_MISSING");
       const content=playlist?safeFinalNarrative(answer.content,playlist,Array.isArray(verifiedTracks)?verifiedTracks as Array<{artist_name?:unknown;track_title?:unknown}>:[]):answer.content?.trim()||"검증된 곡을 찾았습니다.";
       for(const delta of content.match(/.{1,16}/gs)??[]) yield {type:"text_delta",delta,progress:95};
-      if(playlist) yield {type:"playlist",data:playlist};
+      if(playlist) {session.currentIntent=intent;session.currentPlaylistCandidateIds=playlist.tracks.map((track)=>track.candidate_id).filter((value):value is string=>Boolean(value));const assistantMessage={id:crypto.randomUUID(),role:"assistant" as const,content:intentPatch?.userMeaningSummary??"선택한 마음과 요청을 추천에 반영했어요.",createdAt:new Date().toISOString()};session.messages.push(assistantMessage);yield {type:"session",data:session};yield {type:"playlist",data:playlist};}
       return;
     }
     const normalizedToolCalls=normalizeToolCalls(answer.tool_calls);messages.push({role:"assistant",content:answer.content??"",tool_calls:normalizedToolCalls});

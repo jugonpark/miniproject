@@ -15,6 +15,7 @@ const completed: Record<string, string> = {
 };
 
 export function activityEntry(event: Event): ActivityEntry | null {
+  if (event.type === "revision_status" && typeof event.message === "string") return { state: event.state === "FAILED" ? "failed" : event.state === "COMPLETED" ? "completed" : "started", message: event.message };
   if (event.type === "activity" && typeof event.message === "string") {
     const generic = event.service === "nvidia" ? (event.state === "completed" ? "추천 방향을 정리했어요" : "마음의 흐름을 음악 언어로 바꾸는 중") : event.message;
     return { state: event.state === "completed" ? "completed" : "started", message: generic };

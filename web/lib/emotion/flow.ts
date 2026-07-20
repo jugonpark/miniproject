@@ -52,7 +52,7 @@ export function clearDependentAnswers(state: EmotionFlowState, goal: RegulationG
 export function toMusicRequest(state: EmotionFlowState): MusicRequest {
   const labels = [broadLabel(state.broadState), state.emotionLabel, goalLabel(state.regulationGoal), conditionalLabel(state), state.intensity ? `감정 강도 ${state.intensity}` : undefined].filter((value): value is string => Boolean(value));
   const base = `현재 마음은 ${labels.join(", ")}에 가깝습니다. 이 감정의 흐름을 존중하며 실제로 검증된 음악을 추천해 주세요.`;
-  return { conditions: labels, region: state.region ?? "mixed", free_text: state.extraRequest?.trim() ? `${base} 추가 요청: ${state.extraRequest.trim()}` : base, familiar_artists: [], count: 10 };
+  return { conditions: labels, region: state.region ?? "mixed", free_text: state.extraRequest?.trim() ? `${base} 추가 요청: ${state.extraRequest.trim()}` : base, familiar_artists: [], count: 10, ui_selections: { broadState: state.broadState, emotionDetail: state.emotion, regulationGoal: state.regulationGoal, intensity: state.intensity, activity: state.context, region: state.region ?? "mixed" } };
 }
 
 export function previewArc(state: EmotionFlowState): string[] {

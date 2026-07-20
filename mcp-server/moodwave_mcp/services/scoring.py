@@ -30,6 +30,9 @@ class TrackRecommendationFeatures(BaseModel):
     total_score: float
     available_dimensions: list[str]
     score_reasons: list[str]
+    positive_tag_matches: list[str] = Field(default_factory=list)
+    negative_tag_matches: list[str] = Field(default_factory=list)
+    cluster_scores: dict[str, float] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -72,8 +75,14 @@ def score_track(track: VerifiedTrack, intent: dict) -> TrackRecommendationFeatur
     hard = hard_constraint_result(track, intent)
     preferences = intent.get("preferences") or {}
     required_scenes = set((intent.get("hardConstraints") or {}).get("requiredScenes") or [])
-    requested_genres = set(normalize_tags(preferences.get("genres") or []))
+    requested_genres = set(normalize_tags([*(preferences.get("genres") or []), *((intent.get("hardConstraints") or {}).get("includedGenres") or [])]))
     tags = set(normalize_tags(track.tags))
+    plan = intent.get("lastFmTagPlan") or {}
+    positive_plan_tags = {str(item.get("tag")) for group, items in plan.items() if group != "negative" for item in items if isinstance(item, dict)}
+    negative_plan_tags = {str(item.get("tag")) for item in plan.get("negative") or [] if isinstance(item, dict)}
+    positive_matches = sorted(tags & positive_plan_tags); negative_matches = sorted(tags & negative_plan_tags)
+    clusters = {"ENERGY_HIGH": {"energetic", "high energy", "dance"}, "ENERGY_LOW": {"mellow", "downtempo", "chillout"}, "CALM_TEXTURE": {"ambient", "instrumental", "piano", "acoustic"}, "DARK_MOOD": {"melancholic"}, "POP_ACCESSIBLE": {"pop", "dance"}, "ELECTRONIC_TEXTURE": {"electronic", "ambient"}, "ROCK_ENERGY": {"rock", "alternative"}}
+    cluster_scores = {name: max((track.tag_evidence.get(tag, .3) for tag in tags & members), default=0.0) for name, members in clusters.items()}
     reasons: list[str] = []
 
     scene_score = None
@@ -132,7 +141,8 @@ def score_track(track: VerifiedTrack, intent: dict) -> TrackRecommendationFeatur
     max_scores = {"energy": 30, "scene": 15, "chat": 20, "activity": 15, "vocal": 10, "novelty": 5, "popularity": 5}
     denominator = sum(max_scores[name] for name in available)
     total = round(sum(available.values()) / denominator * 100, 2) if hard.passed and denominator else 0.0
-    return TrackRecommendationFeatures(candidate_id=track.candidate_id or track.recording_id, hard_constraint_result=hard, scene_score=scene_score, energy_score=energy_score, mood_score=mood_score, activity_score=activity_score, vocal_score=vocal_score, novelty_score=novelty_score, popularity_score=popularity_score, chat_intent_score=chat_intent_score, chat_intent_breakdown=chat_breakdown, emotional_arc_score=emotional_arc_score, total_score=total, available_dimensions=list(available), score_reasons=reasons)
+    if negative_matches and total: total = max(0.0, round(total - min(20.0, len(negative_matches) * 8.0), 2))
+    return TrackRecommendationFeatures(candidate_id=track.candidate_id or track.recording_id, hard_constraint_result=hard, scene_score=scene_score, energy_score=energy_score, mood_score=mood_score, activity_score=activity_score, vocal_score=vocal_score, novelty_score=novelty_score, popularity_score=popularity_score, chat_intent_score=chat_intent_score, chat_intent_breakdown=chat_breakdown, emotional_arc_score=emotional_arc_score, total_score=total, available_dimensions=list(available), score_reasons=reasons, positive_tag_matches=positive_matches, negative_tag_matches=negative_matches, cluster_scores=cluster_scores)
 
 
 def evaluate_tracks(tracks: list[VerifiedTrack], intent: dict) -> list[ScoredTrack]:

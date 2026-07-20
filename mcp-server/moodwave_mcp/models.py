@@ -39,6 +39,10 @@ class CandidateArtist(BaseModel):
     matched_tags: list[str] = Field(default_factory=list)
     matched_categories: list[str] = Field(default_factory=list)
     appearance_count: int = Field(default=1, ge=1)
+    tag_weights: dict[str, float] = Field(default_factory=dict)
+    matched_clusters: list[str] = Field(default_factory=list)
+    best_lastfm_rank: int | None = None
+    source_pages: list[int] = Field(default_factory=list)
 
 
 class TrackCandidate(BaseModel):
@@ -85,6 +89,9 @@ class VerifiedTrack(BaseModel):
     artist_country: str | None = Field(default=None, exclude_if=lambda value: value is None)
     origin_status: Literal["VERIFIED_KR", "VERIFIED_FOREIGN", "UNKNOWN"] | None = Field(default=None, exclude_if=lambda value: value is None)
     scene_match: Literal["KOREAN_INDIE"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    track_top_tags: list[str] = Field(default_factory=list)
+    discovery_tags: list[str] = Field(default_factory=list)
+    tag_evidence: dict[str, float] = Field(default_factory=dict)
 
     # Compatibility properties keep Task 2 callers working while serialized data uses the approved contract.
     @property
