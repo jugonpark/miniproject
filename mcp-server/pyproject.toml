@@ -2,7 +2,7 @@
 name = "moodwave-mcp"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["pydantic>=2.0"]
+dependencies = ["httpx>=0.28", "pydantic>=2.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
