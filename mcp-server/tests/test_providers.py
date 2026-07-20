@@ -390,6 +390,34 @@ def test_requester_honors_retry_after_header():
     assert sleeps == [2.0]
 
 
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [("999", 5.0), ("inf", 0.25), ("NaN", 0.25), ("later", 0.25)],
+)
+def test_requester_caps_or_rejects_unsafe_retry_after_values(retry_after, expected_delay):
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": retry_after}, json={})
+        return httpx.Response(200, json={"ok": True})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await JsonRequester(http, retries=1, sleep=sleep).get(
+                "https://provider.example/data"
+            )
+
+    assert run(scenario()) == {"ok": True}
+    assert sleeps == [expected_delay]
+
+
 def test_requester_converts_timeout_without_leaking_request_details():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("timed out with api_key=private", request=request)
@@ -516,33 +544,59 @@ def test_discovery_cache_does_not_reuse_tasks_across_event_loops():
     assert first != second
 
 
-def test_discovery_cache_recovers_after_cancelled_task():
+def test_discovery_cache_recovers_after_underlying_task_cancellation():
     class StubLastFm:
         calls = 0
 
         async def discover(self, tags, limit):
             self.calls += 1
             if self.calls == 1:
-                started.set()
-                await asyncio.Event().wait()
+                raise asyncio.CancelledError
             return [CandidateArtist(name="Recovered", source="stub")]
 
     async def scenario():
         provider = StubLastFm()
         service = DiscoveryService(provider)
-        cancelled = asyncio.create_task(service.discover(["calm"]))
-        await started.wait()
-        cancelled.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await cancelled
+            await service.discover(["calm"])
         recovered = await service.discover(["calm"])
         return provider.calls, recovered
 
-    started = asyncio.Event()
     calls, recovered = run(scenario())
 
     assert calls == 2
     assert recovered == [CandidateArtist(name="Recovered", source="stub")]
+
+
+def test_discovery_cache_caller_cancellation_does_not_cancel_shared_task():
+    class StubLastFm:
+        calls = 0
+
+        async def discover(self, tags, limit):
+            self.calls += 1
+            started.set()
+            await release.wait()
+            return [CandidateArtist(name="Shared", source="stub")]
+
+    async def scenario():
+        provider = StubLastFm()
+        service = DiscoveryService(provider)
+        cancelled_waiter = asyncio.create_task(service.discover(["calm"]))
+        await started.wait()
+        surviving_waiter = asyncio.create_task(service.discover(["CALM"]))
+        await asyncio.sleep(0)
+        cancelled_waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled_waiter
+        release.set()
+        return provider.calls, await surviving_waiter
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls, result = run(scenario())
+
+    assert calls == 1
+    assert result == [CandidateArtist(name="Shared", source="stub")]
 
 
 def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_none():

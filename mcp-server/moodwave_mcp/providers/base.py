@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from math import isfinite
 from typing import Any
 
 import httpx
+
+
+MAX_RETRY_DELAY = 5.0
 
 
 class ProviderError(RuntimeError):
@@ -78,6 +82,9 @@ def _backoff(attempt: int) -> float:
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:
     try:
-        return max(0.0, float(response.headers["Retry-After"]))
+        delay = float(response.headers["Retry-After"])
     except (KeyError, ValueError):
         return _backoff(attempt)
+    if not isfinite(delay) or delay <= 0:
+        return _backoff(attempt)
+    return min(delay, MAX_RETRY_DELAY)

@@ -79,7 +79,11 @@ async def get_or_create_async(
 
     task.add_done_callback(discard_failure)
     try:
-        return await task
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if task.cancelled():
+            cache.discard(key, task)
+        raise
     except BaseException:
         cache.discard(key, task)
         raise
