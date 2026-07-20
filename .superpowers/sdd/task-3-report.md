@@ -19,4 +19,11 @@ Implemented bounded Last.fm, MusicBrainz, and Cover Art Archive providers plus c
 ## Concerns
 
 - Verification is mock-only; no live Last.fm, MusicBrainz, or Cover Art Archive calls were made because credentials/live-service validation were outside this task.
-- Task 1's `VerifiedTrack` has no public release-year or release-group field. MusicBrainz uses release dates to select the earliest normalized release and retains its release-group ID only for Cover Art fallback.
+
+## VerifiedTrack contract follow-up
+
+- RED: `python -m pytest tests/test_providers.py -q` reported `3 failed, 11 passed`; the old model lacked the approved canonical fields and MusicBrainz did not expose release year/group data.
+- Implemented all approved `VerifiedTrack` fields, normalized MusicBrainz release year and release-group ID with `None` for unknown values, and retained read/validation compatibility for Task 2 callers.
+- GREEN targeted: `python -m pytest tests/test_providers.py -q` reported `14 passed in 0.29s`.
+- GREEN full: `python -m pytest -q -p no:cacheprovider` reported `29 passed in 0.47s` outside the sandbox for pytest temporary-directory access.
+- Commit: `73e077d fix: align verified track provider contract`.
