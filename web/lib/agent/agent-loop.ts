@@ -1,4 +1,4 @@
-import { callTool } from "@/lib/mcp/client";
+import { callTool, McpTransportError } from "@/lib/mcp/client";
 import type { MusicRequest } from "@/lib/schemas/music";
 import { playlistDraftSchema, type PlaylistDraft } from "@/lib/schemas/playlist";
 import { SYSTEM_PROMPT } from "./system-prompt";
@@ -19,7 +19,9 @@ const progress:Record<string,number>={discover_music_candidates:20,expand_simila
 
 async function chat(messages:Message[], requireTool:boolean) {
   const key=process.env.NVIDIA_API_KEY; if(!key) throw new Error("NVIDIA_API_KEY_MISSING");
-  const response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},signal:AbortSignal.timeout(30_000),body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:requireTool?"required":"auto",temperature:.2})});
+  let response:Response;
+  try{response=await fetch(`${process.env.NVIDIA_BASE_URL??"https://integrate.api.nvidia.com/v1"}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},signal:AbortSignal.timeout(60_000),body:JSON.stringify({model:process.env.NVIDIA_MODEL??"qwen/qwen3-235b-a22b",messages,tools:definitions.map((fn)=>({type:"function",function:fn})),tool_choice:requireTool?"required":"auto",temperature:.2})});}
+  catch(error){if(error instanceof Error&&error.name==="TimeoutError")throw new Error("NVIDIA_TIMEOUT");throw error;}
   if(!response.ok) throw new Error(`NVIDIA_${response.status}`);
   const data=await response.json() as {choices:Array<{message:{content:string|null;tool_calls?:ToolCall[]}}>};
   return data.choices[0]?.message;
@@ -43,7 +45,7 @@ export async function* runAgent(request:MusicRequest):AsyncGenerator<AgentEvent>
       const signature=`${call.function.name}:${JSON.stringify(args)}`; if(seen.has(signature)){messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify({error:"동일 도구 호출 반복 차단"})});continue;} seen.add(signature);
       yield {type:"tool",name:call.function.name,state:"started",message:label[call.function.name]??"도구를 실행하고 있습니다.",progress:progress[call.function.name]??15};
       try{const result=await Promise.race([callTool<unknown>(call.function.name,args),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error("MCP_TOOL_TIMEOUT")),45_000))]);if(call.function.name==="compose_playlist")playlist=playlistDraftSchema.parse(result);messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify(result)});yield {type:"tool_result",name:call.function.name,state:"completed",summary:call.function.name==="compose_playlist"?`${playlist?.tracks.length??0}곡을 구성했습니다.`:"완료했습니다.",progress:Math.min(95,(progress[call.function.name]??15)+10)};}
-      catch(error){if(error instanceof Error&&error.message==="MCP_TOOL_TIMEOUT")throw error;messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify({error:"도구 실행 실패. 인자를 수정하거나 가능한 결과로 계속하세요."})});yield {type:"tool_result",name:call.function.name,state:"failed",summary:"도구 실행에 실패했습니다.",progress:progress[call.function.name]??15};}
+      catch(error){if(error instanceof Error&&error.message==="MCP_TOOL_TIMEOUT")throw error;if(error instanceof McpTransportError)throw new Error("MCP_CONNECTION_FAILED");messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify({error:"도구 실행 실패. 인자를 수정하거나 가능한 결과로 계속하세요."})});yield {type:"tool_result",name:call.function.name,state:"failed",summary:"도구 실행에 실패했습니다.",progress:progress[call.function.name]??15};}
     }
   }
   throw new Error("AGENT_LOOP_LIMIT");

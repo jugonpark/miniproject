@@ -1,4 +1,5 @@
 import { runAgent } from "@/lib/agent/agent-loop";
+import { agentError } from "@/lib/agent/error";
 import { musicRequestSchema } from "@/lib/schemas/music";
 
 const encoder = new TextEncoder();
@@ -17,9 +18,7 @@ export async function POST(raw: Request) {
         send({ type:"done" });
       } catch (error) {
         console.error("agent request failed", error instanceof Error ? error.message : "UNKNOWN");
-        const missing=error instanceof Error&&error.message==="NVIDIA_API_KEY_MISSING";
-        const timeout=error instanceof Error&&(error.message==="MCP_TOOL_TIMEOUT"||error.name==="TimeoutError");
-        send({ type:"error", code:missing?"NVIDIA_API_KEY_MISSING":timeout?"UPSTREAM_TIMEOUT":"AGENT_FAILED", message:missing?"NVIDIA API 키가 설정되지 않았습니다.":timeout?"음악 서비스 응답이 늦어 요청을 종료했습니다. 잠시 후 다시 시도해 주세요.":"추천 생성에 실패했습니다. 서버 로그의 오류 코드를 확인해 주세요." });
+        send({ type:"error", ...agentError(error) });
         send({ type:"done" });
       } finally { controller.close(); }
     },
