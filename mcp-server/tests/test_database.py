@@ -22,6 +22,7 @@ def make_draft(title: str, tracks: list[RecommendedTrack] | None = None) -> Play
         tracks=tracks
         or [
             RecommendedTrack(
+                position=1,
                 recording_id="recording-2",
                 title="Second track",
                 artist="Artist B",
@@ -29,6 +30,7 @@ def make_draft(title: str, tracks: list[RecommendedTrack] | None = None) -> Play
                 familiar=False,
             ),
             RecommendedTrack(
+                position=2,
                 recording_id="recording-1",
                 title="First track",
                 artist="Artist A",
@@ -67,6 +69,7 @@ def test_save_playlist_is_idempotent_and_returns_tracks_in_position_order(tmp_pa
         "recording-2",
         "recording-1",
     ]
+    assert [track.position for track in saved.tracks] == [1, 2]
 
     fetched = database.get_playlist(saved.id)
     assert fetched == saved

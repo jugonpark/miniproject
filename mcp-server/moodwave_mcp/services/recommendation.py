@@ -51,6 +51,7 @@ def compose_playlist(
     add_from(ranked, request.count)
     recommended = [
         RecommendedTrack(
+            position=position,
             recording_id=track.recording_id,
             title=track.title,
             artist=track.artist,
@@ -61,7 +62,7 @@ def compose_playlist(
             youtube_music_url=create_youtube_music_url(track.title, track.artist),
             familiar=track.artist.strip().casefold() in familiar_artists,
         )
-        for track in selected
+        for position, track in enumerate(selected, start=1)
     ]
     return PlaylistDraft(
         title=f"Moodwave: {', '.join(request.conditions)}",

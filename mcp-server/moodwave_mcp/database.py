@@ -104,7 +104,7 @@ class Database:
             [
                 (
                     playlist_id,
-                    position,
+                    track.position,
                     track.recording_id,
                     track.title,
                     track.artist,
@@ -115,7 +115,7 @@ class Database:
                     str(track.youtube_music_url),
                     int(track.familiar),
                 )
-                for position, track in enumerate(draft.tracks)
+                for track in draft.tracks
             ],
         )
         return playlist_id
@@ -155,6 +155,7 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
             tracks=[
                 RecommendedTrack(
+                    position=track["position"],
                     recording_id=track["recording_id"],
                     title=track["title"],
                     artist=track["artist"],

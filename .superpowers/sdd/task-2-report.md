@@ -33,4 +33,15 @@ Green: `python -m pytest tests/test_recommendation.py -q` passed: `8 passed in 0
 
 ## Concerns
 
-`RecommendedTrack` has no `position` field, and the existing database writes list positions starting at zero. Task 2 preserves list order but cannot express the requested one-based position without changing Task 1-owned models/database files.
+None.
+
+## Position-contract fix
+
+Red: after adding one-based position assertions, `python -m pytest tests/test_recommendation.py tests/test_database.py -q` failed because `RecommendedTrack` had no `position` attribute (the database tests also hit the known sandbox temporary-directory permission error).
+
+The fix adds required positive `RecommendedTrack.position`, assigns positions with `enumerate(selected, start=1)`, and persists/retrieves the field without renumbering.
+
+- `python -m pytest tests/test_recommendation.py -q` — `8 passed in 0.13s`
+- `python -m pytest tests/test_database.py -q` (allowed outside the sandbox for pytest temporary-directory access) — `5 passed in 0.21s`
+- `python -m pytest -q` (allowed outside the sandbox for pytest temporary-directory access) — `13 passed in 0.23s`
+- `git diff --check` — clean

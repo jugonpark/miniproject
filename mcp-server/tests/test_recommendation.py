@@ -93,6 +93,7 @@ def test_compose_playlist_honors_limits_ratio_unique_recordings_and_artist_cap()
     assert [item.recording_id for item in draft.tracks] == [
         "f1", "f2", "f4", "d1", "d2", "d3", "d4",
     ]
+    assert [item.position for item in draft.tracks] == list(range(1, len(draft.tracks) + 1))
     assert sum(item.familiar for item in draft.tracks) == 3
     assert len({item.recording_id for item in draft.tracks}) == len(draft.tracks)
     assert max(sum(item.artist == artist for item in draft.tracks) for artist in {item.artist for item in draft.tracks}) <= 2
@@ -108,6 +109,7 @@ def test_compose_playlist_uses_sixty_forty_when_candidates_permit():
     draft = compose_playlist(candidates, request)
 
     assert len(draft.tracks) == 10
+    assert [item.position for item in draft.tracks] == list(range(1, 11))
     assert sum(item.familiar for item in draft.tracks) == 6
 
 

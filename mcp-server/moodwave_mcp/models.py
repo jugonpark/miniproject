@@ -36,6 +36,7 @@ class VerifiedTrack(BaseModel):
 
 
 class RecommendedTrack(BaseModel):
+    position: int = Field(ge=1)
     recording_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     artist: str = Field(min_length=1)
