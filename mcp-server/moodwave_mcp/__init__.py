@@ -1,0 +1,1 @@
+"""MOODWAVE FastMCP support package."""
