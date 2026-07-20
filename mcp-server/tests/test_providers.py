@@ -6,7 +6,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from moodwave_mcp.models import CandidateArtist
+from moodwave_mcp.models import CandidateArtist, VerifiedTrack
 from moodwave_mcp.providers.base import JsonRequester, ProviderError
 from moodwave_mcp.providers.cover_art import CoverArtProvider
 from moodwave_mcp.providers.lastfm import LastFmProvider
@@ -100,6 +100,23 @@ def test_musicbrainz_requires_user_agent():
         MusicBrainzProvider("")
 
 
+def test_verified_track_exposes_the_approved_contract_fields():
+    assert {
+        "recording_id",
+        "track_title",
+        "artist_name",
+        "artist_mbid",
+        "album_title",
+        "release_year",
+        "release_id",
+        "release_group_id",
+        "cover_image_url",
+        "tags",
+        "popularity_score",
+        "source",
+    } <= set(VerifiedTrack.model_fields)
+
+
 def test_musicbrainz_normalizes_releases_and_dedupes_recording_ids():
     requests: list[httpx.Request] = []
 
@@ -140,16 +157,20 @@ def test_musicbrainz_normalizes_releases_and_dedupes_recording_ids():
     assert [track.recording_id for track in tracks] == ["recording-1", "recording-2"]
     assert tracks[0].model_dump(mode="json") == {
         "recording_id": "recording-1",
-        "title": "Joga",
-        "artist": "Bjork",
-        "artist_id": "artist-1",
+        "track_title": "Joga",
+        "artist_name": "Bjork",
+        "artist_mbid": "artist-1",
+        "album_title": "Homogenic",
+        "release_year": 1997,
         "release_id": "release-1",
-        "release_title": "Homogenic",
-        "cover_url": None,
+        "release_group_id": "group-1",
+        "cover_image_url": None,
         "tags": [],
-        "popularity": 0,
-        "region": None,
+        "popularity_score": 0,
+        "source": "musicbrainz",
     }
+    assert tracks[1].release_year is None
+    assert tracks[1].release_group_id is None
     assert all(request.headers["user-agent"] == "Moodwave/1.0 (test@example.com)" for request in requests)
 
 
@@ -301,8 +322,6 @@ def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_no
         async def verify_artist_tracks(self, artist, limit):
             if artist == "Broken":
                 raise ProviderError("provider unavailable")
-            from moodwave_mcp.models import VerifiedTrack
-
             return [VerifiedTrack(recording_id="ok-1", title="Song", artist=artist)]
 
     class StubCovers:
@@ -318,6 +337,6 @@ def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_no
 
     assert len(tracks) == 1
     assert tracks[0].recording_id == "ok-1"
-    assert tracks[0].cover_url is None
+    assert tracks[0].cover_image_url is None
     assert tracks[0].tags == ["calm"]
-    assert tracks[0].popularity == 7
+    assert tracks[0].popularity_score == 7

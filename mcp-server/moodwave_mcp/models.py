@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl
 
 
 class MusicRequest(BaseModel):
@@ -23,16 +23,64 @@ class CandidateArtist(BaseModel):
 
 
 class VerifiedTrack(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     recording_id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    artist: str = Field(min_length=1)
-    artist_id: str | None = None
+    track_title: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("track_title", "title"),
+    )
+    artist_name: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("artist_name", "artist"),
+    )
+    artist_mbid: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("artist_mbid", "artist_id"),
+    )
+    album_title: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("album_title", "release_title"),
+    )
+    release_year: int | None = None
     release_id: str | None = None
-    release_title: str | None = None
-    cover_url: HttpUrl | None = None
+    release_group_id: str | None = None
+    cover_image_url: HttpUrl | None = Field(
+        default=None,
+        validation_alias=AliasChoices("cover_image_url", "cover_url"),
+    )
     tags: list[str] = Field(default_factory=list)
-    popularity: int = Field(default=0, ge=0)
-    region: str | None = None
+    popularity_score: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("popularity_score", "popularity"),
+    )
+    source: str = Field(default="musicbrainz", min_length=1)
+
+    # Compatibility properties keep Task 2 callers working while serialized data uses the approved contract.
+    @property
+    def title(self) -> str:
+        return self.track_title
+
+    @property
+    def artist(self) -> str:
+        return self.artist_name
+
+    @property
+    def artist_id(self) -> str | None:
+        return self.artist_mbid
+
+    @property
+    def release_title(self) -> str | None:
+        return self.album_title
+
+    @property
+    def cover_url(self) -> HttpUrl | None:
+        return self.cover_image_url
+
+    @property
+    def popularity(self) -> int:
+        return self.popularity_score
 
 
 class RecommendedTrack(BaseModel):

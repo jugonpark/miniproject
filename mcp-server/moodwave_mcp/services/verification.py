@@ -45,21 +45,20 @@ class VerificationService:
                 if track.recording_id in seen:
                     continue
                 seen.add(track.recording_id)
-                release_group = None
-                if hasattr(self.musicbrainz, "release_group_id"):
-                    release_group = self.musicbrainz.release_group_id(track.recording_id)
                 try:
-                    cover_url = await self.cover_art.find_cover(track.release_id, release_group)
+                    cover_url = await self.cover_art.find_cover(
+                        track.release_id,
+                        track.release_group_id,
+                    )
                 except Exception:
                     cover_url = None
                 verified.append(
                     VerifiedTrack.model_validate(
                         {
                             **track.model_dump(),
-                            "cover_url": cover_url,
+                            "cover_image_url": cover_url,
                             "tags": artist.tags,
-                            "popularity": artist.popularity,
-                            "region": artist.region,
+                            "popularity_score": artist.popularity,
                         }
                     )
                 )

@@ -33,7 +33,6 @@ class MusicBrainzProvider:
         self.sleep = sleep
         self._last_request_at: float | None = None
         self._spacing_lock = asyncio.Lock()
-        self._release_groups: dict[str, str | None] = {}
 
     async def verify_artist_tracks(self, artist: str, limit: int = 10) -> list[VerifiedTrack]:
         name = artist.strip()
@@ -78,25 +77,25 @@ class MusicBrainzProvider:
             seen.add(recording_id)
             release = _best_release(item.get("releases"))
             release_group = release.get("release-group", {}) if release else {}
-            self._release_groups[recording_id] = (
-                str(release_group.get("id")) if isinstance(release_group, dict) and release_group.get("id") else None
-            )
             tracks.append(
                 VerifiedTrack(
                     recording_id=recording_id,
-                    title=title,
-                    artist=normalized_name,
-                    artist_id=artist_id,
+                    track_title=title,
+                    artist_name=normalized_name,
+                    artist_mbid=artist_id,
+                    album_title=str(release.get("title")) if release and release.get("title") else None,
+                    release_year=_release_year(release),
                     release_id=str(release.get("id")) if release and release.get("id") else None,
-                    release_title=str(release.get("title")) if release and release.get("title") else None,
+                    release_group_id=(
+                        str(release_group.get("id"))
+                        if isinstance(release_group, dict) and release_group.get("id")
+                        else None
+                    ),
                 )
             )
             if len(tracks) >= bounded:
                 break
         return tracks
-
-    def release_group_id(self, recording_id: str) -> str | None:
-        return self._release_groups.get(recording_id)
 
     async def _get(self, path: str, *, params: dict[str, object]) -> dict:
         async with self._spacing_lock:
@@ -116,3 +115,8 @@ class MusicBrainzProvider:
 def _best_release(value: object) -> dict:
     releases = [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
     return min(releases, key=lambda item: str(item.get("date") or "9999"), default={})
+
+
+def _release_year(release: dict) -> int | None:
+    year = str(release.get("date") or "")[:4]
+    return int(year) if len(year) == 4 and year.isdigit() else None
