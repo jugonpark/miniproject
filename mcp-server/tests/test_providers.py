@@ -95,6 +95,39 @@ def test_lastfm_zero_limit_returns_empty_without_network_calls():
     assert run(scenario()) == ([], [])
 
 
+def test_lastfm_malformed_artist_containers_return_empty_results():
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.params["method"]
+        if method == "tag.gettopartists":
+            return httpx.Response(200, json={"topartists": []})
+        return httpx.Response(200, json={"similarartists": "invalid"})
+
+    async def scenario():
+        async with client(handler) as http:
+            provider = LastFmProvider("secret", client=http)
+            return await provider.discover(["calm"]), await provider.similar(["Beach House"])
+
+    assert run(scenario()) == ([], [])
+
+
+def test_lastfm_malformed_top_tags_normalize_to_empty_tags():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params["method"] == "artist.getsimilar":
+            return httpx.Response(
+                200,
+                json={"similarartists": {"artist": [{"name": "M83", "match": "0.5"}]}},
+            )
+        return httpx.Response(200, json={"toptags": {"tag": {"name": "invalid"}}})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await LastFmProvider("secret", client=http).similar(["Beach House"])
+
+    assert run(scenario()) == [
+        CandidateArtist(name="M83", source="lastfm:similar", tags=[], popularity=500)
+    ]
+
+
 def test_musicbrainz_requires_user_agent():
     with pytest.raises(ValueError, match="User-Agent"):
         MusicBrainzProvider("")
@@ -204,6 +237,75 @@ def test_musicbrainz_enforces_injected_request_spacing():
     assert sleeps == [1.0]
 
 
+def test_musicbrainz_spaces_every_retry_attempt():
+    now = 0.0
+    attempt_times: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        nonlocal now
+        assert delay > 0
+        now += delay
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempt_times.append(now)
+        artist_attempts = sum(item.url.path.endswith("/artist") for item in requests)
+        requests.append(request)
+        if request.url.path.endswith("/artist") and artist_attempts == 0:
+            return httpx.Response(503, json={})
+        if request.url.path.endswith("/artist"):
+            return httpx.Response(200, json={"artists": [{"id": "artist-1", "name": "B"}]})
+        return httpx.Response(200, json={"recordings": []})
+
+    requests: list[httpx.Request] = []
+
+    async def scenario():
+        async with client(handler) as http:
+            await MusicBrainzProvider(
+                "Moodwave/1.0",
+                client=http,
+                min_interval=1.0,
+                clock=lambda: now,
+                sleep=sleep,
+            ).verify_artist_tracks("B")
+
+    run(scenario())
+
+    assert attempt_times == [0.0, 1.0, 2.0]
+
+
+def test_musicbrainz_serializes_concurrent_request_starts():
+    now = 0.0
+    attempt_times: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempt_times.append(now)
+        if request.url.path.endswith("/artist"):
+            return httpx.Response(200, json={"artists": [{"id": "artist-1", "name": "B"}]})
+        return httpx.Response(200, json={"recordings": []})
+
+    async def scenario():
+        async with client(handler) as http:
+            provider = MusicBrainzProvider(
+                "Moodwave/1.0",
+                client=http,
+                min_interval=1.0,
+                clock=lambda: now,
+                sleep=sleep,
+            )
+            await asyncio.gather(
+                provider.verify_artist_tracks("A"),
+                provider.verify_artist_tracks("B"),
+            )
+
+    run(scenario())
+
+    assert attempt_times == [0.0, 1.0, 2.0, 3.0]
+
+
 def test_musicbrainz_zero_limit_returns_empty_without_network_calls():
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("zero-limit requests must not reach the network")
@@ -239,6 +341,10 @@ def test_cover_art_uses_release_then_release_group_and_rejects_unusable_images()
 
 def test_requester_retries_transient_failures_at_most_twice_and_sets_timeout():
     attempts = 0
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
@@ -247,7 +353,7 @@ def test_requester_retries_transient_failures_at_most_twice_and_sets_timeout():
 
     async def scenario():
         async with client(handler) as http:
-            requester = JsonRequester(http, timeout=0.25, sleep=lambda _: asyncio.sleep(0))
+            requester = JsonRequester(http, timeout=0.25, sleep=sleep)
             with pytest.raises(ProviderError, match="unavailable") as error:
                 await requester.get("https://provider.example/data", params={"api_key": "private"})
             return str(error.value)
@@ -255,8 +361,33 @@ def test_requester_retries_transient_failures_at_most_twice_and_sets_timeout():
     message = run(scenario())
 
     assert attempts == 3
+    assert sleeps == [0.25, 0.5]
     assert "private" not in message
     assert "must not leak" not in message
+
+
+def test_requester_honors_retry_after_header():
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"}, json={})
+        return httpx.Response(200, json={"ok": True})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await JsonRequester(http, retries=1, sleep=sleep).get(
+                "https://provider.example/data"
+            )
+
+    assert run(scenario()) == {"ok": True}
+    assert sleeps == [2.0]
 
 
 def test_requester_converts_timeout_without_leaking_request_details():
@@ -317,6 +448,103 @@ def test_discovery_service_expands_similar_artists_with_normalized_cache_key():
     assert first == second == [CandidateArtist(name="M83", source="stub")]
 
 
+def test_discovery_cache_recovers_after_failure():
+    class StubLastFm:
+        calls = 0
+
+        async def discover(self, tags, limit):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("temporary failure")
+            return [CandidateArtist(name="Recovered", source="stub")]
+
+    async def scenario():
+        provider = StubLastFm()
+        service = DiscoveryService(provider)
+        with pytest.raises(ProviderError, match="temporary"):
+            await service.discover(["calm"])
+        recovered = await service.discover(["CALM"])
+        return provider.calls, recovered
+
+    calls, recovered = run(scenario())
+
+    assert calls == 2
+    assert recovered == [CandidateArtist(name="Recovered", source="stub")]
+
+
+def test_discovery_cache_shares_inflight_same_key_work():
+    class StubLastFm:
+        calls = 0
+
+        async def discover(self, tags, limit):
+            self.calls += 1
+            await release.wait()
+            return [CandidateArtist(name="Shared", source="stub")]
+
+    async def scenario():
+        provider = StubLastFm()
+        service = DiscoveryService(provider)
+        first = asyncio.create_task(service.discover(["calm"]))
+        await asyncio.sleep(0)
+        second = asyncio.create_task(service.discover(["CALM"]))
+        await asyncio.sleep(0)
+        release.set()
+        return provider.calls, await asyncio.gather(first, second)
+
+    release = asyncio.Event()
+    calls, results = run(scenario())
+
+    assert calls == 1
+    assert results[0] == results[1]
+
+
+def test_discovery_cache_does_not_reuse_tasks_across_event_loops():
+    class StubLastFm:
+        calls = 0
+
+        async def discover(self, tags, limit):
+            self.calls += 1
+            return [CandidateArtist(name=f"Call {self.calls}", source="stub")]
+
+    provider = StubLastFm()
+    service = DiscoveryService(provider)
+
+    first = run(service.discover(["calm"]))
+    second = run(service.discover(["calm"]))
+
+    assert provider.calls == 2
+    assert first != second
+
+
+def test_discovery_cache_recovers_after_cancelled_task():
+    class StubLastFm:
+        calls = 0
+
+        async def discover(self, tags, limit):
+            self.calls += 1
+            if self.calls == 1:
+                started.set()
+                await asyncio.Event().wait()
+            return [CandidateArtist(name="Recovered", source="stub")]
+
+    async def scenario():
+        provider = StubLastFm()
+        service = DiscoveryService(provider)
+        cancelled = asyncio.create_task(service.discover(["calm"]))
+        await started.wait()
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        recovered = await service.discover(["calm"])
+        return provider.calls, recovered
+
+    started = asyncio.Event()
+    calls, recovered = run(scenario())
+
+    assert calls == 2
+    assert recovered == [CandidateArtist(name="Recovered", source="stub")]
+
+
 def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_none():
     class StubMusicBrainz:
         async def verify_artist_tracks(self, artist, limit):
@@ -340,3 +568,32 @@ def test_verification_keeps_other_artists_when_one_fails_and_cover_failure_is_no
     assert tracks[0].cover_image_url is None
     assert tracks[0].tags == ["calm"]
     assert tracks[0].popularity_score == 7
+
+
+def test_verification_cache_evicts_failed_artist_tasks_for_recovery():
+    class StubMusicBrainz:
+        calls = 0
+
+        async def verify_artist_tracks(self, artist, limit):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("temporary failure")
+            return [VerifiedTrack(recording_id="ok-1", title="Song", artist=artist)]
+
+    class StubCovers:
+        async def find_cover(self, release_id, release_group_id=None):
+            return None
+
+    async def scenario():
+        provider = StubMusicBrainz()
+        service = VerificationService(provider, StubCovers())
+        artist = [CandidateArtist(name="Working", source="lastfm")]
+        first = await service.verify(artist)
+        second = await service.verify(artist)
+        return provider.calls, first, second
+
+    calls, first, second = run(scenario())
+
+    assert calls == 2
+    assert first == []
+    assert [track.recording_id for track in second] == ["ok-1"]

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable
 
 from moodwave_mcp.models import CandidateArtist, VerifiedTrack
 
-from .cache import TTLCache
+from .cache import TTLCache, get_or_create_async
 
 
 class VerificationService:
@@ -32,13 +31,14 @@ class VerificationService:
         seen: set[str] = set()
         for artist in list(artists)[: self.max_results]:
             try:
-                task = self.cache.get_or_create(
+                tracks = await get_or_create_async(
+                    self.cache,
                     ("verify", artist.name.strip().casefold(), bounded_per_artist),
-                    lambda artist=artist: asyncio.create_task(
-                        self.musicbrainz.verify_artist_tracks(artist.name, bounded_per_artist)
+                    lambda artist=artist: self.musicbrainz.verify_artist_tracks(
+                        artist.name,
+                        bounded_per_artist,
                     ),
                 )
-                tracks = await task
             except Exception:
                 continue
             for track in tracks:

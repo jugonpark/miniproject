@@ -27,7 +27,11 @@ class MusicBrainzProvider:
         if not user_agent.strip():
             raise ValueError("MusicBrainz User-Agent is required")
         self.user_agent = user_agent.strip()
-        self.requester = JsonRequester(client or httpx.AsyncClient(), timeout=timeout)
+        self.requester = JsonRequester(
+            client or httpx.AsyncClient(),
+            timeout=timeout,
+            sleep=sleep,
+        )
         self.min_interval = max(0.0, min_interval)
         self.clock = clock
         self.sleep = sleep
@@ -98,18 +102,21 @@ class MusicBrainzProvider:
         return tracks
 
     async def _get(self, path: str, *, params: dict[str, object]) -> dict:
+        payload = await self.requester.get(
+            f"{self.base_url}{path}",
+            params=params,
+            headers={"User-Agent": self.user_agent, "Accept": "application/json"},
+            before_attempt=self._pace_attempt,
+        )
+        return payload or {}
+
+    async def _pace_attempt(self, _: int) -> None:
         async with self._spacing_lock:
             if self._last_request_at is not None:
                 remaining = self.min_interval - (self.clock() - self._last_request_at)
                 if remaining > 0:
                     await self.sleep(remaining)
             self._last_request_at = self.clock()
-            payload = await self.requester.get(
-                f"{self.base_url}{path}",
-                params=params,
-                headers={"User-Agent": self.user_agent, "Accept": "application/json"},
-            )
-        return payload or {}
 
 
 def _best_release(value: object) -> dict:

@@ -33,9 +33,7 @@ class LastFmProvider:
         seen: set[str] = set()
         for tag in normalize_tags(tags):
             payload = await self._call("tag.gettopartists", tag=tag, limit=bounded)
-            artists = payload.get("topartists", {}).get("artist", [])
-            if not isinstance(artists, list):
-                continue
+            artists = _nested_list(payload, "topartists", "artist")
             for item in artists:
                 if not isinstance(item, dict):
                     continue
@@ -64,9 +62,7 @@ class LastFmProvider:
         seen: set[str] = set()
         for artist in (value.strip() for value in artists if value.strip()):
             payload = await self._call("artist.getsimilar", artist=artist, limit=bounded)
-            similar = payload.get("similarartists", {}).get("artist", [])
-            if not isinstance(similar, list):
-                continue
+            similar = _nested_list(payload, "similarartists", "artist")
             for item in similar:
                 if not isinstance(item, dict):
                     continue
@@ -89,7 +85,7 @@ class LastFmProvider:
 
     async def _top_tags(self, artist: str) -> list[str]:
         payload = await self._call("artist.gettoptags", artist=artist)
-        values = payload.get("toptags", {}).get("tag", [])
+        values = _nested_list(payload, "toptags", "tag")
         return normalize_tags(
             str(item.get("name", ""))
             for item in values[:10]
@@ -115,3 +111,11 @@ def _number(value: object) -> float:
 
 def _integer(value: object) -> int:
     return round(_number(value))
+
+
+def _nested_list(payload: dict, container_name: str, values_name: str) -> list:
+    container = payload.get(container_name)
+    if not isinstance(container, dict):
+        return []
+    values = container.get(values_name)
+    return values if isinstance(values, list) else []

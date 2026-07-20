@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from threading import Event, Lock
 from time import monotonic
@@ -52,3 +53,33 @@ class TTLCache:
         finally:
             with self._lock:
                 self._inflight.pop(key).event.set()
+
+    def discard(self, key: object, value: object) -> None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None and entry[1] is value:
+                self._entries.pop(key)
+
+
+async def get_or_create_async(
+    cache: TTLCache,
+    key: object,
+    factory: Callable[[], Awaitable[T]],
+) -> T:
+    loop = asyncio.get_running_loop()
+    while True:
+        task = cache.get_or_create(key, lambda: loop.create_task(factory()))
+        if task.get_loop() is loop:
+            break
+        cache.discard(key, task)
+
+    def discard_failure(done: asyncio.Task[T]) -> None:
+        if done.cancelled() or done.exception() is not None:
+            cache.discard(key, done)
+
+    task.add_done_callback(discard_failure)
+    try:
+        return await task
+    except BaseException:
+        cache.discard(key, task)
+        raise
