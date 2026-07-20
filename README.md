@@ -50,7 +50,7 @@ npm.cmd run build
 ## 배포
 
 1. Neon에서 프로젝트를 만들고 pooled `DATABASE_URL`을 복사합니다.
-2. Prefect Horizon에서 `mcp-server`를 프로젝트 루트로 가져오고 엔트리포인트 `moodwave_mcp/server.py:mcp` 또는 `fastmcp.json`을 사용합니다. 네 가지 FastMCP 환경변수를 설정합니다.
+2. Prefect Horizon에서 Dependencies를 `mcp-server/pyproject.toml`, Entrypoint를 `mcp-server/server.py:mcp`로 지정합니다. 네 가지 FastMCP 환경변수를 설정합니다.
 3. Horizon의 공개 HTTPS `/mcp` URL을 Vercel의 `MCP_SERVER_URL`로 설정합니다.
 4. Vercel에서 Root Directory를 `web`으로 지정하고 NVIDIA 환경변수를 설정해 배포합니다. 같은 계정의 v0 프로젝트에 연결하면 v0의 Publish 기능으로 동일 Vercel 프로젝트를 갱신할 수 있습니다.
 
