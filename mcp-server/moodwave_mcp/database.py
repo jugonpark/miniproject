@@ -47,6 +47,22 @@ class Database:
                 );
                 """
             )
+            for row in connection.execute(
+                "SELECT DISTINCT playlist_id FROM playlist_tracks WHERE position = 0"
+            ):
+                playlist_id = row["playlist_id"]
+                track_ids = connection.execute(
+                    "SELECT id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id",
+                    (playlist_id,),
+                ).fetchall()
+                connection.execute(
+                    "UPDATE playlist_tracks SET position = -id - 1 WHERE playlist_id = ?",
+                    (playlist_id,),
+                )
+                connection.executemany(
+                    "UPDATE playlist_tracks SET position = ? WHERE id = ?",
+                    [(position, track["id"]) for position, track in enumerate(track_ids, start=1)],
+                )
 
     def save_playlist(
         self, draft: PlaylistDraft, idempotency_key: str | None

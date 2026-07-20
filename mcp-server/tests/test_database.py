@@ -57,6 +57,38 @@ def test_initialize_is_idempotent(tmp_path):
     assert {"playlists", "playlist_tracks"} <= tables
 
 
+def test_initialize_migrates_legacy_zero_based_positions_once(tmp_path):
+    database = Database(tmp_path / "moodwave.db")
+    database.initialize()
+    with sqlite3.connect(database.path) as connection:
+        playlist_id = connection.execute(
+            """
+            INSERT INTO playlists (title, description, request_json, created_at, idempotency_key)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("Legacy", "", '{"conditions":["calm"]}', "2026-01-01T00:00:00+00:00", None),
+        ).lastrowid
+        connection.executemany(
+            """
+            INSERT INTO playlist_tracks (
+                playlist_id, position, recording_id, title, artist, youtube_music_url, familiar
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (playlist_id, 0, "legacy-1", "First", "Artist A", "https://music.youtube.com/first", 0),
+                (playlist_id, 1, "legacy-2", "Second", "Artist B", "https://music.youtube.com/second", 1),
+            ],
+        )
+
+    database.initialize()
+    migrated = database.get_playlist(playlist_id)
+    database.initialize()
+    repeated = database.get_playlist(playlist_id)
+
+    assert [track.position for track in migrated.tracks] == [1, 2]
+    assert repeated == migrated
+
+
 def test_save_playlist_is_idempotent_and_returns_tracks_in_position_order(tmp_path):
     database = Database(tmp_path / "moodwave.db")
     database.initialize()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from time import sleep
+
+import pytest
 
 from moodwave_mcp.models import MusicRequest, VerifiedTrack
 from moodwave_mcp.services.cache import TTLCache
@@ -70,6 +73,33 @@ def test_ttl_cache_shares_same_key_concurrent_call():
         results = list(executor.map(lambda _: cache.get_or_create("key", create), range(2)))
 
     assert results == ["shared", "shared"]
+    assert calls == 1
+
+
+def test_ttl_cache_shares_same_key_factory_failure():
+    cache = TTLCache(ttl_seconds=60)
+    started = Event()
+    release = Event()
+    calls = 0
+
+    def create():
+        nonlocal calls
+        calls += 1
+        started.set()
+        release.wait()
+        raise ValueError("shared failure")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(cache.get_or_create, "key", create)
+        assert started.wait(timeout=1)
+        second = executor.submit(cache.get_or_create, "key", create)
+        sleep(0.02)
+        release.set()
+        with pytest.raises(ValueError, match="shared failure"):
+            first.result()
+        with pytest.raises(ValueError, match="shared failure"):
+            second.result()
+
     assert calls == 1
 
 
