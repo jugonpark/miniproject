@@ -6,7 +6,7 @@
 
 - GitHub: https://github.com/jugonpark/miniproject
 - MCP 서버: https://premier-coral-pony.fastmcp.app/mcp
-- 웹 배포: Vercel 배포 주소 제출 시 함께 기재
+- 웹 배포: https://miniproject-khaki-gamma.vercel.app/
 
 ## 주요 기능
 
