@@ -94,6 +94,7 @@ NVIDIA_API_KEY=
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 NVIDIA_MODEL=qwen/qwen3-next-80b-a3b-instruct
 MCP_SERVER_URL=https://premier-coral-pony.fastmcp.app/mcp
+FASTMCP_API_KEY=
 ```
 
 ### FastMCP (`mcp-server/.env`)
@@ -118,8 +119,9 @@ DATABASE_URL=
 ### Next.js / Vercel
 
 - Root Directory: `web`
-- 환경변수: `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL`, `MCP_SERVER_URL`
+- 환경변수: `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL`, `MCP_SERVER_URL`, `FASTMCP_API_KEY`
 - `MCP_SERVER_URL`에는 배포된 HTTPS MCP 주소를 입력합니다.
+- Horizon에서 인증을 활성화했다면 해당 서버의 접속 키를 `FASTMCP_API_KEY`에 입력합니다. 이 값은 브라우저에 공개하지 않는 서버 전용 환경변수입니다.
 
 ### Database / Neon
 

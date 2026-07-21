@@ -19,9 +19,12 @@ export class McpTransportError extends Error {}
 async function connect(): Promise<Client> {
   const url = process.env.MCP_SERVER_URL;
   if (!url) throw new Error("MCP_SERVER_URL is not configured");
+  const apiKey = process.env.FASTMCP_API_KEY;
 
   const client = new Client({ name: "moodwave-web", version: "1.0.0" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(url)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(url), apiKey ? {
+    requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+  } : undefined));
   return client;
 }
 
