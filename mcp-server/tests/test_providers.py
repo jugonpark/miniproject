@@ -6,7 +6,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from moodwave_mcp.models import CandidateArtist, VerifiedTrack
+from moodwave_mcp.models import CandidateArtist, TrackCandidate, VerifiedTrack
 from moodwave_mcp.providers.base import JsonRequester, ProviderError
 from moodwave_mcp.providers.cover_art import CoverArtProvider
 from moodwave_mcp.providers.lastfm import LastFmProvider
@@ -53,6 +53,22 @@ def test_lastfm_normalizes_tag_artists_and_bounds_results():
     ]
 
 
+def test_lastfm_collects_each_tag_independently_and_logs_counts(caplog):
+    caplog.set_level("INFO", logger="moodwave")
+    def handler(request: httpx.Request) -> httpx.Response:
+        tag = request.url.params["tag"]
+        artists = [] if tag == "empty" else [{"name": f"Artist {tag}"}]
+        return httpx.Response(200, json={"topartists": {"artist": artists}})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await LastFmProvider("secret", client=http).discover(["empty", "calm"], limit=5)
+
+    assert [artist.name for artist in run(scenario())] == ["Artist calm"]
+    assert '"lastFmMethod": "tag.getTopArtists"' in caplog.text
+    assert '"resultCountByTag": {"empty": 0, "calm": 1}' in caplog.text
+
+
 def test_lastfm_normalizes_similar_artists_and_top_tags():
     def handler(request: httpx.Request) -> httpx.Response:
         method = request.url.params["method"]
@@ -93,6 +109,34 @@ def test_lastfm_zero_limit_returns_empty_without_network_calls():
             )
 
     assert run(scenario()) == ([], [])
+
+
+def test_lastfm_collects_track_candidates_for_an_artist():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["method"] == "artist.gettoptracks"
+        return httpx.Response(200, json={"toptracks": {"track": [{"name": " 좋은 날 ", "artist": {"name": "아이유"}}]}})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await LastFmProvider("secret", client=http).top_tracks("아이유", 3)
+
+    tracks = run(scenario())
+    assert [(track.artist, track.title, track.source) for track in tracks] == [("아이유", "좋은 날", "lastfm:toptracks")]
+
+
+def test_musicbrainz_verifies_a_recording_by_artist_and_title():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/recording")
+        assert 'recording:"Good Day"' in request.url.params["query"]
+        assert 'artist:"IU"' in request.url.params["query"]
+        return httpx.Response(200, json={"recordings": [{"id":"r1","title":"Good Day","artist-credit":[{"artist":{"id":"a1","name":"IU"}}],"releases":[]}]})
+
+    async def scenario():
+        async with client(handler) as http:
+            return await MusicBrainzProvider("Moodwave/1.0", client=http, min_interval=0).verify_track(TrackCandidate(artist="IU", title="Good Day", source="test"))
+
+    track = run(scenario())
+    assert track is not None and (track.recording_id, track.track_title, track.artist_name) == ("r1", "Good Day", "IU")
 
 
 def test_lastfm_malformed_artist_containers_return_empty_results():

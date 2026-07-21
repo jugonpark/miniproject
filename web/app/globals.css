@@ -63,6 +63,12 @@ button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .status { color: #1ed760; }
 .progress { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: #333; }
 .progress span { display: block; height: 100%; border-radius: inherit; background: #1ed760; transition: width .25s ease; }
+.activity-panel { margin-top: 12px; padding: 18px 20px; border: 1px solid #2a2a2a; border-radius: 12px; background: #121212; }
+.activity-panel ol { display: grid; gap: 9px; margin: 12px 0 0; padding: 0; list-style: none; color: #b3b3b3; font-size: .9rem; }
+.activity-panel li { display: flex; align-items: center; gap: 9px; }
+.activity-panel li span { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #f5c451; }
+.activity-panel li[data-state="completed"] span { background: #1ed760; }
+.activity-panel li[data-state="failed"] span { background: #f87171; }
 .error { color: #f3727f; box-shadow: #f3727f 0 0 0 1px inset; }
 .summary strong { display: block; margin-bottom: 8px; font-size: 1.1rem; }
 .summary p { margin: 0; color: #cbcbcb; line-height: 1.55; }
@@ -80,6 +86,43 @@ button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .library-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .library-row h2 { margin: 0 0 5px; }
 
+.emotion-interview { position: relative; min-height: 560px; display: grid; place-items: center; overflow: hidden; padding: 70px 32px 52px; border: 1px solid rgba(255,255,255,.08); border-radius: 24px; background: radial-gradient(circle at 50% 20%, rgba(30,215,96,.12), transparent 48%), #111; transition: background .5s ease; }
+.mood-low { background: radial-gradient(circle at 45% 20%, rgba(68,88,160,.35), transparent 52%), #0d1018; }
+.mood-unsettled, .mood-complex, .mood-blocked { background: radial-gradient(circle at 55% 18%, rgba(137,78,196,.28), transparent 52%), #120e18; }
+.mood-calm { background: radial-gradient(circle at 45% 18%, rgba(31,177,166,.28), transparent 52%), #0b1515; }
+.mood-energetic { background: radial-gradient(circle at 50% 18%, rgba(240,143,45,.25), transparent 52%), #171109; }
+.question-stage { width: min(760px, 100%); text-align: center; animation: enter .3s ease both; }
+.question-stage.leaving { opacity: .25; transform: translateY(-8px); }
+.question-stage h1 { margin: 12px 0 18px; outline: 0; font-size: clamp(2rem, 5vw, 4.25rem); line-height: 1.08; letter-spacing: -.055em; }
+.question-stage > p:not(.eyebrow) { color: #b9b9b9; font-size: 1.05rem; line-height: 1.7; }
+.eyebrow { margin: 0; color: #1ed760; font-size: .72rem; font-weight: 800; letter-spacing: .18em; }
+.interview-start { margin-top: 24px; }
+.interview-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 30px; }
+.emotion-option { min-height: 70px; padding: 16px 20px; border: 1px solid #393939; border-radius: 14px; background: rgba(28,28,28,.75); color: #eee; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.emotion-option:hover, .emotion-option:focus-visible { border-color: #1ed760; background: rgba(30,215,96,.1); transform: translateY(-2px); outline: 0; }
+.intensity-options { grid-template-columns: repeat(5, minmax(0,1fr)); align-items: stretch; }
+.intensity-options .emotion-option { display: grid; place-items: center; gap: 10px; min-height: 130px; padding: 12px 8px; font-size: .76rem; }
+.intensity-options i { width: var(--size); height: var(--size); display: block; border-radius: 50%; background: #1ed760; box-shadow: 0 0 22px rgba(30,215,96,.38); }
+.flow-dots { position: absolute; top: 24px; display: flex; gap: 7px; }
+.flow-dots span { width: 22px; height: 3px; border-radius: 9px; background: #3b3b3b; }
+.flow-dots span.active { background: #1ed760; }
+.interview-nav { position: absolute; left: 28px; right: 28px; bottom: 24px; display: flex; justify-content: space-between; }
+.back-button, .reset-button { border: 0; background: transparent; color: #aaa; cursor: pointer; }
+.arc { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 34px 0 8px; }
+.arc span { padding: 10px 14px; border-radius: 99px; background: rgba(255,255,255,.07); color: #ddd; }
+.arc b { margin-right: 10px; color: #1ed760; }
+.region-options { display: flex; justify-content: center; gap: 8px; margin-top: 22px; }
+.region-options button { padding: 8px 13px; border: 1px solid #444; border-radius: 99px; background: transparent; color: #aaa; cursor: pointer; }
+.region-options button[aria-pressed="true"] { border-color: #1ed760; background: rgba(30,215,96,.12); color: #fff; }
+.extra-request { display: block; max-width: 620px; margin: 18px auto 0; text-align: left; }
+.extra-request > span { display: block; margin-bottom: 8px; color: #ddd; font-size: .86rem; font-weight: 700; }
+.extra-request small { margin-left: 5px; color: #777; font-weight: 400; }
+.extra-request textarea { min-height: 76px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+.actions h2 { margin-right: auto; }
+.reason { color: #aaa; font-size: .82rem; line-height: 1.45; }
+@keyframes enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
 @media (max-width: 1100px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 768px) {
   .shell { width: 100%; min-height: 100vh; margin: 0; padding: 20px 18px 48px; border-radius: 0; }
@@ -91,6 +134,9 @@ button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
   .panel { padding: 18px; }
   .grid { grid-template-columns: 1fr; }
   .library-row { align-items: flex-start; flex-direction: column; }
+  .emotion-interview { min-height: 610px; padding: 62px 16px 54px; border-radius: 18px; }
+  .interview-options, .intensity-options { grid-template-columns: 1fr; max-height: 340px; overflow-y: auto; }
+  .intensity-options .emotion-option { min-height: 72px; display: flex; justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

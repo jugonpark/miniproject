@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from collections.abc import Iterable
 
 import httpx
 
-from moodwave_mcp.models import CandidateArtist
+from moodwave_mcp.models import CandidateArtist, TrackCandidate
 from moodwave_mcp.services.normalization import normalize_tags
 
 from .base import JsonRequester, ProviderError
@@ -29,12 +32,19 @@ class LastFmProvider:
         bounded = min(50, max(0, limit))
         if not bounded:
             return []
+        requested_tags = normalize_tags(tags)
+        per_tag = min(10, max(3, (bounded + max(1, len(requested_tags)) - 1) // max(1, len(requested_tags))))
+        payloads = await asyncio.gather(
+            *(self._call("tag.gettopartists", tag=tag, limit=per_tag) for tag in requested_tags),
+            return_exceptions=True,
+        )
         results: list[CandidateArtist] = []
         seen: set[str] = set()
-        for tag in normalize_tags(tags):
-            payload = await self._call("tag.gettopartists", tag=tag, limit=bounded)
-            artists = _nested_list(payload, "topartists", "artist")
-            for item in artists:
+        counts: dict[str, int] = {}
+        for tag, payload in zip(requested_tags, payloads):
+            artists = [] if isinstance(payload, BaseException) else _nested_list(payload, "topartists", "artist")
+            counts[tag] = len(artists)
+            for rank, item in enumerate(artists, start=1):
                 if not isinstance(item, dict):
                     continue
                 name = str(item.get("name", "")).strip()
@@ -50,9 +60,58 @@ class LastFmProvider:
                         popularity=_integer(item.get("listeners") or item.get("playcount")),
                     )
                 )
-                if len(results) >= bounded:
-                    return results
-        return results
+        logging.getLogger("moodwave").warning(
+            "lastfm_discovery=%s",
+            json.dumps({"lastFmMethod": "tag.getTopArtists", "lastFmRequestedTags": requested_tags, "resultCountByTag": counts}, ensure_ascii=False),
+        )
+        return results[:bounded]
+
+    async def discover_grouped(self, groups: dict[str, list[str]], quotas: dict[str, int], limit: int = 25) -> list[CandidateArtist]:
+        bounded = min(50, max(0, limit))
+        tag_requests: dict[str, dict[str, object]] = {}
+        for category, tags in groups.items():
+            normalized = normalize_tags(tags)
+            per_tag = max(1, (quotas.get(category, 4) + len(normalized) - 1) // max(1, len(normalized)))
+            for tag in normalized:
+                request = tag_requests.setdefault(tag, {"categories": [], "limit": 1})
+                request["categories"] = list(dict.fromkeys([*request["categories"], category]))
+                request["limit"] = max(int(request["limit"]), per_tag)
+        requests = [(tag, list(value["categories"]), int(value["limit"])) for tag, value in tag_requests.items()]
+        payloads = await asyncio.gather(*(self._call("tag.gettopartists", tag=tag, limit=per_tag) for tag, _, per_tag in requests), return_exceptions=True)
+        merged: dict[str, CandidateArtist] = {}
+        counts: dict[str, int] = {}
+        for (tag, categories, _), payload in zip(requests, payloads):
+            artists = [] if isinstance(payload, BaseException) else _nested_list(payload, "topartists", "artist")
+            counts[tag] = len(artists)
+            for rank, item in enumerate(artists, start=1):
+                if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+                    continue
+                name = str(item["name"]).strip()
+                key = name.casefold()
+                current = merged.get(key)
+                if current is None:
+                    merged[key] = CandidateArtist(name=name, source="lastfm:tag", tags=[tag], popularity=_integer(item.get("listeners") or item.get("playcount")), matched_tags=[tag], matched_categories=categories, tag_weights={tag: 1.0}, matched_clusters=[tag], best_lastfm_rank=rank, source_pages=[1])
+                else:
+                    merged[key] = current.model_copy(update={"tags": list(dict.fromkeys([*current.tags, tag])), "matched_tags": list(dict.fromkeys([*current.matched_tags, tag])), "matched_categories": list(dict.fromkeys([*current.matched_categories, *categories])), "matched_clusters": list(dict.fromkeys([*current.matched_clusters, tag])), "tag_weights": {**current.tag_weights, tag: max(current.tag_weights.get(tag, 0), 1.0)}, "appearance_count": current.appearance_count + 1, "best_lastfm_rank": min(current.best_lastfm_rank or rank, rank), "popularity": max(current.popularity, _integer(item.get("listeners") or item.get("playcount")))})
+        ranked = sorted(merged.values(), key=lambda artist: (-artist.appearance_count, -artist.popularity, artist.name.casefold()))
+        logging.getLogger("moodwave").warning("lastfm_grouped_discovery=%s", json.dumps({"requestedTagsByCategory": groups, "quotas": quotas, "resultCountByTag": counts, "discoveredArtists": [artist.name for artist in ranked[:bounded]], "artistEvidence": [artist.model_dump(include={"name", "matched_tags", "matched_categories", "appearance_count"}) for artist in ranked[:bounded]]}, ensure_ascii=False))
+        return ranked[:bounded]
+
+    async def discover_country(self, country: str, limit: int = 25, required_tags: Iterable[str] = ()) -> list[CandidateArtist]:
+        bounded = min(50, max(0, limit))
+        requested = set(normalize_tags(required_tags))
+        payload = await self._call("geo.gettopartists", country=country, limit=min(50, max(bounded * 2, 20)))
+        artists = _nested_list(payload, "topartists", "artist")
+        named = [(str(item["name"]).strip(), item) for item in artists if isinstance(item, dict) and str(item.get("name") or "").strip()]
+        tag_results = await asyncio.gather(*(self._top_tags(name) for name, _ in named), return_exceptions=True)
+        results = []
+        for (name, item), tags in zip(named, tag_results):
+            normalized = [] if isinstance(tags, BaseException) else tags
+            matched = sorted(requested & set(normalized))
+            if requested and not matched:
+                continue
+            results.append(CandidateArtist(name=name, source="lastfm:geo", tags=normalized, popularity=_integer(item.get("listeners")), matched_tags=matched, matched_categories=["country_seed"], appearance_count=max(1, len(matched))))
+        return sorted(results, key=lambda artist: (-artist.appearance_count, -artist.popularity))[:bounded]
 
     async def similar(self, artists: Iterable[str], limit: int = 25) -> list[CandidateArtist]:
         bounded = min(50, max(0, limit))
@@ -82,6 +141,29 @@ class LastFmProvider:
                 if len(results) >= bounded:
                     return results
         return results
+
+    async def top_tracks(self, artist: str, limit: int = 5) -> list[TrackCandidate]:
+        bounded = min(10, max(0, limit))
+        if not artist.strip() or not bounded:
+            return []
+        payload = await self._call("artist.gettoptracks", artist=artist.strip(), limit=bounded)
+        results = []
+        for item in _nested_list(payload, "toptracks", "track"):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("name") or "").strip()
+            credited = item.get("artist")
+            name = str(credited.get("name") if isinstance(credited, dict) else artist).strip()
+            if title and name:
+                results.append(TrackCandidate(artist=name, title=title, source="lastfm:toptracks"))
+        return results
+
+    async def track_top_tags(self, artist: str, track: str) -> list[str]:
+        try:
+            payload = await self._call("track.gettoptags", artist=artist, track=track)
+        except ProviderError:
+            return []
+        return normalize_tags(str(item.get("name", "")) for item in _nested_list(payload, "toptags", "tag")[:10] if isinstance(item, dict))
 
     async def _top_tags(self, artist: str) -> list[str]:
         payload = await self._call("artist.gettoptags", artist=artist)
